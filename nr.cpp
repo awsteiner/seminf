@@ -8,9 +8,6 @@
   dx=7.0/((double)ngrid); in monfun and monfun2 because it helped
   convergence.
 
-  Could rework integrations to utilize the facilities of table
-  integration.
-
   Need to double check diff eq's for APR.
 
   12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
@@ -65,34 +62,85 @@ typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
 static const double big=3.0;
 static const int ngrid=100;
 
-string dirname;
+/// If true, output relaxation iterations
 bool relaxfile;
+/// If true, \f$ Q_{nn}=Q_{np} \f$
 bool qnn_equals_qnp;
+/// If true, match to exponential decay on the RHS
 bool rhsmode;
+/// Minimum err
 double minerr;
+/// Desc
 double monfact;
+/// Desc
 double expo;
+/// Neutron drip density
 double nndrip;
+/// Proton drip density
 double npdrip;
+/// Desc
 bool flatden;
+/// Nonlinear equation solver
 mroot_hybrids<> nd;
+/// Desc
 double nnrhs;
+/// Desc
 double nprhs;
+/// Desc
 double rhslength;
 
 //--------------------------------------------
 // Structure for relax parameters
 
-typedef struct relaxp_s {
-  double mun, mup, nn0, np0, qnn, qpp, qnp, n0half;
+class relaxp {
+
+public:
+
+  /// Neutron chemical potential
+  double mun;
+  /// Proton chemical potential
+  double mup;
+  double nn0;
+  double np0;
+  /// Isoscalar gradient term for neutrons
+  double qnn;
+  /// Isoscalar gradient term for protons
+  double qpp;
+  /// Isovector gradient term
+  double qnp;
+  /// Saturation density of isospin-symmetric matter
+  double n0half;
   bool showrelax;
-  double dndnl, dndnr, dndpl, dndpr, dpdnl, dpdnr, dpdpl, dpdpr;
-  double lex1, lex2, rex1, rex2, dmundn, barn, dmundp, nsat, protfrac;
+  double dndnl;
+  double dndnr;
+  double dndpl;
+  double dndpr;
+  double dpdnl;
+  double dpdnr;
+  double dpdpl;
+  double dpdpr;
+  double lex1;
+  double lex2;
+  double rex1;
+  double rex2;
+  double barn;
+  double dmundn;
+  double dmundp;
+  /// Saturation density of matter with current proton fraction
+  double nsat;
+  /// Current proton fraction (in high-density region)
+  double protfrac;
+  /// Proton fraction index
   int pf_index;
+  /// EOS pointer
   eos_had_base *eos;
-  fermion n, p;
+  /// Neutron
+  fermion n;
+  /// Proton
+  fermion p;
+  /// Thermodynamic functions
   thermo hb;
-} relaxp;
+};
 
 class seminf_nr *snp;
 
@@ -102,16 +150,23 @@ class seminf_nr_relax : public relax {
 
 public:
 
+  /// Desc
   relaxp *rp;
   
+  /// Desc
   int ctr;
 
+  /// Desc
   double errold;
   
+  /// Desc
   seminf_nr_relax(int tne, int tnb, int tngrid);
   
-  int iter(int k, double err, double fac, ubvector_int &kmax, ubvector &errmax);
+  /// Desc
+  int iter(int k, double err, double fac, ubvector_int &kmax,
+	   ubvector &errmax);
 
+  /// Desc
   int difeq(int k, int k1, int k2, int jsf, int is1, int isf);
   
 };
@@ -126,10 +181,11 @@ public:
     rhslength=2.0;
   }
 
+  /// If true, we have good boundary conditions
   bool goodbound;
+  /// Initial derivative for densities on LHS (typically negative)
   double firstderiv;
-  double temper;
-  double pbpf;
+  
   ubvector xstor;
   ubmatrix ystor;
   double xg1[ngrid+1];
@@ -144,11 +200,20 @@ public:
   int iend;
   int relret1;
   int relret2;
+  /// Type of EOS model in use
   string model;
+  /// Integrator to compute integrals of final solution
   inte_qagiu_gsl<> gl2;
+  /// Store the solution
   table<ubvector> at;
+  /// \name Interactions to use
+  //@{
   eos_had_apr eosa;
   eos_had_potential eosg;
+  eos_had_skyrme eoss;
+  eos_had_schematic eosp;
+  //@}
+  /// To compute derivatives
   deriv_gsl<> df;
   seminf_nr_relax *rel;
   relaxp rp;
@@ -166,24 +231,16 @@ public:
     ubvector sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0, xn[4], xp[4];
     double thick;
-    int i, pf_index, choice, ngl=32, j, npf;
+    int i, pf_index, j, npf;
     ofstream fout;
     double lon, lop, hin, hip, sqt;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
+
+    // Not used ATM but probably useful later
     ubvector rho, alpha, ebulk, egrad, esurf, thickint;
     ubvector wdint, wd2int;
-    ubvector vqnn, vqnp, *qpp;
+    ubvector vqnn, vqnp, vqpp;
     
-    inte_qag_gsl<> gl;
-    eos_had_skyrme eoss;
-    eos_had_schematic eosp;
-
-    if (argc<2) {
-      cout << "Need directory name." << endl;
-      exit(-1);
-    }
-    dirname=argv[1];
-
     nd.tol_abs=1.0e-11;
     nd.tol_rel=1.0e-8;
     nd.ntrial=100;
@@ -205,7 +262,7 @@ public:
       rp.qnn=0.1875*(eoss.t1*(1.0-eoss.x1)-eoss.t2*(1.0+eoss.x2));
       rp.qpp=rp.qnn;
       rp.qnp=0.125*(3.0*eoss.t1*(1.0+eoss.x1/2.0)-
-      eoss.t2*(1.0+eoss.x2/2.0));
+		    eoss.t2*(1.0+eoss.x2/2.0));
       
     } else if (model==((string)"schematic")) {
       rp.eos=&eosp;
@@ -241,7 +298,7 @@ public:
 
     at.set_nlines(ngrid*2);
     at.line_of_names(((string)"x nn np nnp npp scale rho alpha ")+
-		      "ebulk egrad esurf thickint wdint wd2int");
+		     "ebulk egrad esurf thickint wdint wd2int");
 
     xstor.resize(ngrid+1);
     ystor.resize(5+1,ngrid+1);
@@ -251,7 +308,6 @@ public:
     rp.showrelax=true;
     relaxfile=false;
     firstderiv=-2.0e-4;
-    temper=0.0;
     rhsmin=1.0e-7;
     monfact=0.002;
 
@@ -663,8 +719,8 @@ public:
 	at.set("alpha",i,rp.n.n-rp.p.n);
 	at.set("ebulk",i,rp.hb.ed-rp.mun*at.get(1,i)-rp.mup*at.get(2,i));
 	at.set("egrad",i,0.5*rp.qnn*at.get(3,i)*at.get(3,i)+
-		0.5*rp.qpp*at.get(4,i)*at.get(4,i)+
-		rp.qnp*at.get(3,i)*at.get(4,i));
+	       0.5*rp.qpp*at.get(4,i)*at.get(4,i)+
+	       rp.qnp*at.get(3,i)*at.get(4,i));
 	at.set("esurf",i,at.get("ebulk",i)+at.get("egrad",i));
 	at.set("thickint",i,at.get(1,i)/rp.nn0-at.get(2,i)/rp.np0);
 	if (fabs(rp.protfrac-0.5)>1.0e-8) {
@@ -735,9 +791,9 @@ public:
 	for(i=1;i<((int)at.get_nlines());i++) {
 
 	  at.set("nnpp",i,(at.get("nnp",i)-at.get("nnp",i-1))/
-		  (at.get("x",i)-at.get("x",i-1)));
+		 (at.get("x",i)-at.get("x",i-1)));
 	  at.set("nppp",i,(at.get("npp",i)-at.get("npp",i-1))/
-		  (at.get("x",i)-at.get("x",i-1)));
+		 (at.get("x",i)-at.get("x",i-1)));
 	
 	  tx=(at.get("x",i)+at.get("x",i-1))/2.0;
 	  ty[1]=(at.get("nn",i)+at.get("nn",i-1))/2.0;
@@ -755,9 +811,9 @@ public:
 	    at.set("lhs_n",i,(rp.n.mu-rp.mun+rp.p.mu-rp.mup)/2.0);
 	    at.set("lhs_a",i,(rp.n.mu-rp.mun-rp.p.mu+rp.mup)/2.0);
 	    at.set("rhs_n",i,(at.get("nnpp",i)+at.get("nppp",i))/2.0*
-		    (rp.qnn+rp.qnp));
+		   (rp.qnn+rp.qnp));
 	    at.set("rhs_a",i,(at.get("nnpp",i)-at.get("nppp",i))/2.0*
-		    (rp.qnn-rp.qnp));
+		   (rp.qnn-rp.qnp));
 	  } else {
 	    at.set("lhs_n",i,rp.n.mu-rp.mun);
 	    at.set("rhs_n",i,at.get("nnpp",i)*(rp.qnn));
@@ -770,7 +826,9 @@ public:
   
     return 0;
   }
-  
+
+  /** \brief Desc
+   */
   double lookup(int n, double yy0, const ubvector &x, const ubvector &y) {
     double x0;
     int i;
@@ -785,6 +843,8 @@ public:
     return 0.0;
   }
 
+  /** \brief Desc
+   */
   int derivs(double sx, const ubvector &sy, ubvector &dydx) {
     double rhsn, rhsp=0.0, det;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
@@ -912,6 +972,8 @@ public:
     return 0;
   }
 
+  /** \brief Desc
+   */
   double solve_qnn_neq_qnp(double lmonfact) {
     bool guessdone, debug=true;
     double dx, xrhs, delta, epsi;
@@ -970,11 +1032,16 @@ public:
 	       << ystor(3,i) << " " << ystor(4,i) << endl;
 	}
       }
+
+      // If ilast wasn't set, then assume the whole guess is good
+      if (ilast==0) ilast=100;
     
       //----------------------------------------------
       // Arrange guess into relaxation arrays and
       // stretch the solution to grid size=ngrid
-    
+
+      if (debug) cout << "ilast: " << ilast << " " << nndrip << endl;
+      
       rel->x[1]=xstor[1];
       rel->x[ngrid]=xstor[ilast];
       for(i=2;i<ngrid;i++) {
@@ -1191,6 +1258,8 @@ public:
 
   }
 
+  /** \brief Desc
+   */
   double solve_qnn_equal_qnp(double lmonfact) {
     bool guessdone, debug=false;
     double dx, y[5], dydx[5], xrhs;
@@ -1264,7 +1333,9 @@ public:
 	rel->y(3,i)=(rel->x[ngrid]);
 	rel->x[i]=((double)(i-1))/((double)(ngrid-1));
       }
+
     } else {
+
       //----------------------------------------------
       // Use last solution for guess
     
@@ -1305,8 +1376,8 @@ public:
       rp.barn=rel->y(1,i);
       mm_funct11 qqf=std::bind
 	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
-	   (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
-	   std::placeholders::_2,std::placeholders::_3);
+	 (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
+	 std::placeholders::_2,std::placeholders::_3);
       nd.msolve(2,sx,qqf);
 
       at.set(0,i-1,rel->x[i]*rel->y(3,i));
@@ -1416,6 +1487,8 @@ public:
 
   }
 
+  /** \brief Desc
+   */
   int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
 
     rp.n.n=sx[1];
@@ -1430,6 +1503,8 @@ public:
     return 0;
   }
 
+  /** \brief Desc
+   */
   int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
     double pleft, pright, munleft, munright;
 
@@ -1456,6 +1531,8 @@ public:
     return 0;
   }
 
+  /** \brief Desc
+   */
   int pdripfun(size_t sn, const ubvector &sx, ubvector &sy) {
     double pleft, pright, mupleft, mupright;
 
@@ -1503,7 +1580,7 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
   // Output relaxation steps to file
   
   if (true || relaxfile) {
-    string soutt=dirname+"/rel"+itos(k)+".out"+
+    string soutt="rel"+itos(k)+".out"+
       itos(rp->pf_index);
     itout.open(soutt.c_str());
     itout.setf(ios::scientific);
@@ -1574,7 +1651,10 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
   return 0;
 }
 
-int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
+/** \brief Desc
+ */
+int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
+			   int isf) {
 
   int i;
   double dx, exx;
