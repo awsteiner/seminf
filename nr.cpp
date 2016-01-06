@@ -1,26 +1,25 @@
-/*
-  Does not work with dripped protons yet.
-
-  Only zero temperature for now (but some code for finite 
-  temperature has been added).
-
-  11/6/03 - changed dx=14.0/((double)ngrid); to
-  dx=7.0/((double)ngrid); in monfun and monfun2 because it helped
-  convergence.
-
-  Need to double check diff eq's for APR.
-
-  12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
-  nndrip becomes > 0. It seems that in this case, it is better not to
-  automatically adjust the scale of the x-axis, but use a gradual
-  broadening similar to what we have done using the relativistic
-  code. This allows calculation down to really low proton fractions!
-  We need to see if this is consistent with the analytic code for both
-  Qnn<Qnp (hard) and Qnn>Qnp (probably works).
-
-  NOTE: The first proton fraction cannot be 0.5, since then 'smn'
-  gets confused on further values different from 0.5
-
+/**
+   
+   \warning This code is very preliminary, and needs quite a bit of
+   work.
+   
+   Does not work with dripped protons yet.
+   
+   Only zero temperature for now (but some code for finite 
+   temperature has been added).
+   
+   Need to double check diff eq's for APR.
+   
+   \note The first proton fraction cannot be 0.5, since then 'smn'
+   gets confused on further values different from 0.5
+   
+   12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
+   nndrip becomes > 0. It seems that in this case, it is better not to
+   automatically adjust the scale of the x-axis, but use a gradual
+   broadening similar to what we have done using the relativistic
+   code. This allows calculation down to really low proton fractions!
+   We need to see if this is consistent with the analytic code for
+   both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
 */
 
 #include <iostream>
@@ -57,12 +56,12 @@ typedef boost::numeric::ublas::matrix<double> ubmatrix;
 typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
 
 //--------------------------------------------
-// Random global variables
+// Global variables
 
 static const double big=3.0;
 static const int ngrid=100;
 
-/// If true, output relaxation iterations
+/// If true, output relaxation iterations (default false)
 bool relaxfile;
 /// If true, \f$ Q_{nn}=Q_{np} \f$
 bool qnn_equals_qnp;
@@ -78,7 +77,7 @@ double expo;
 double nndrip;
 /// Proton drip density
 double npdrip;
-/// Desc
+/// Desc (default false)
 bool flatden;
 /// Nonlinear equation solver
 mroot_hybrids<> nd;
@@ -196,16 +195,16 @@ public:
   double npprhs;
   double relaxconverge;
   double rhsmin;
+  /** \brief The step size factor for constructing the initial 
+      guess (default 7.0)
+  */
   double initialstep;
-  int iend;
-  int relret1;
-  int relret2;
   /// Type of EOS model in use
   string model;
   /// Integrator to compute integrals of final solution
   inte_qagiu_gsl<> gl2;
   /// Store the solution
-  table<ubvector> at;
+  table<> at;
   /// \name Interactions to use
   //@{
   eos_had_apr eosa;
@@ -229,13 +228,17 @@ public:
     double rhsn, rhsp, det;
     double surf, sbulk, sgrad, sssv_drop=0.0, *pflist;
     ubvector sx(5), sy(5);
-    double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0, xn[4], xp[4];
+    double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0;
+    // Locations of fixed relative densities
+    double xn[4], xp[4];
     double thick;
-    int i, pf_index, j, npf;
+    int pf_index, npf;
     ofstream fout;
     double lon, lop, hin, hip, sqt;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
 
+    int verbose=1;
+    
     // Not used ATM but probably useful later
     ubvector rho, alpha, ebulk, egrad, esurf, thickint;
     ubvector wdint, wd2int;
@@ -291,6 +294,7 @@ public:
       qnn_equals_qnp=false;
       cout << "Qnn!=Qnp" << endl;
     }
+    cout << endl;
   
     flatden=false;
 
@@ -660,8 +664,6 @@ public:
       //--------------------------------------------
       // Solve
       
-      cout << "Going to solver." << endl;
-      
       if (qnn_equals_qnp) {
 	solve_qnn_equal_qnp(monfact);
       } else {
@@ -672,8 +674,8 @@ public:
       // Calculate the value of x for nn*0.9, nn*0.5, 
       // nn*0.1, etc.
 
-      cout << "Lookups. " << endl;
-      for(i=1;i<=3;i++) {
+      if (verbose>1) cout << "Lookups. " << endl;
+      for(int i=1;i<=3;i++) {
 	xn[i]=lookup(at.get_nlines(),
 		     nndrip+(rp.nn0-nndrip)/10.0*((double)(i*4-3)),
 		     at[0],at[1]);
@@ -686,8 +688,8 @@ public:
       rp.barn=rp.nsat;
       hns=rp.eos->fesym(rp.barn);
 
-      cout << "Integrands." << endl;
-      for(i=0;i<((int)at.get_nlines());i++) {
+      if (verbose>1) cout << "Integrands." << endl;
+      for(int i=0;i<((int)at.get_nlines());i++) {
 	// Fix negative values
 	if (at[1][i]<0.0) at.set(1,i,0.0);
 	if (at[2][i]<0.0) at.set(2,i,0.0);
@@ -734,9 +736,9 @@ public:
 	}
       }
     
-      cout << "Integrals." << endl;
+      if (verbose>1) cout << "Integrals." << endl;
 
-      interp<> gi;
+      interp<std::vector<double>,std::vector<double> > gi;
       surf=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		    at[0],(at.get_column("esurf")));
       sbulk=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
@@ -745,7 +747,7 @@ public:
 		     at[0],(at.get_column("egrad")));
       thick=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		     at[0],(at.get_column("thickint")));
-      cout << "thick: " << thick << endl;
+      if (verbose>1) cout << "thick: " << thick << endl;
       if (fabs(rp.protfrac-0.5)>1.0e-8) {
 	wd=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		    at[0],(at.get_column("wdint")));
@@ -769,14 +771,14 @@ public:
 	  (model=="skyrme" || model=="hcskyrme")) {
 	double tx;
 	ubvector ty(5), tdy(5);
-	at.new_column("nnpp");
-	at.new_column("nppp");
-	at.new_column("rhsn");
-	at.new_column("rhsp");
-	at.new_column("lhs_n");
-	at.new_column("lhs_a");
-	at.new_column("rhs_n");
-	at.new_column("rhs_a");
+	if (!at.is_column("nnpp")) at.new_column("nnpp");
+	if (!at.is_column("nppp")) at.new_column("nppp");
+	if (!at.is_column("rhsn")) at.new_column("rhsn");
+	if (!at.is_column("rhsp")) at.new_column("rhsp");
+	if (!at.is_column("lhs_n")) at.new_column("lhs_n");
+	if (!at.is_column("lhs_a")) at.new_column("lhs_a");
+	if (!at.is_column("rhs_n")) at.new_column("rhs_n");
+	if (!at.is_column("rhs_a")) at.new_column("rhs_a");
 	at.set("nnpp",0,0.0);
 	at.set("nppp",0,0.0);
 	at.set("rhsn",0,0.0);
@@ -788,7 +790,7 @@ public:
 
 	rhsmode=false;
 
-	for(i=1;i<((int)at.get_nlines());i++) {
+	for(int i=1;i<((int)at.get_nlines());i++) {
 
 	  at.set("nnpp",i,(at.get("nnp",i)-at.get("nnp",i-1))/
 		 (at.get("x",i)-at.get("x",i-1)));
@@ -822,6 +824,16 @@ public:
 	  }
 	}
       }
+
+      hdf_file hf;
+      string tablename=((string)"nr")+std::to_string(pf_index);
+      hf.open_or_create("nr.o2");
+      hdf_output(hf,at,tablename);
+      hf.close();
+      cout << "Wrote solution to file 'nr.o2'" << endl;
+      cout << endl;
+
+    // Loop for next proton fraction
     }
   
     return 0;
@@ -829,13 +841,12 @@ public:
 
   /** \brief Desc
    */
-  double lookup(int n, double yy0, const ubvector &x, const ubvector &y) {
-    double x0;
-    int i;
+  double lookup(int n, double yy0, const std::vector<double> &x,
+		const std::vector<double> &y) {
 
-    for(i=2;i<=n;i++) {
+    for(int i=2;i<=n;i++) {
       if ((y[i]>=yy0 && y[i-1]<yy0) || (y[i]<yy0 && y[i-1]>=yy0)) {
-	x0=x[i-1]+(x[i]-x[i-1])*(yy0-y[i-1])/(y[i]-y[i-1]);
+	double x0=x[i-1]+(x[i]-x[i-1])*(yy0-y[i-1])/(y[i]-y[i-1]);
 	return x0;
       }
     }
@@ -975,10 +986,11 @@ public:
   /** \brief Desc
    */
   double solve_qnn_neq_qnp(double lmonfact) {
-    bool guessdone, debug=true;
+    bool guessdone;
+    int debug=0;
     double dx, xrhs, delta, epsi;
     ubvector y(5), dydx(5);
-    int i, j, ilast=0, interpi;
+    int ilast=0, interpi;
     ofstream itout;
     char ch;
 
@@ -1004,7 +1016,7 @@ public:
       ystor(4,1)=firstderiv;
       dx=initialstep/((double)ngrid);
     
-      if (debug) {
+      if (debug>0) {
 	cout.width(3);
 	cout << 1 << " " 
 	     << xstor[1] << " " << ystor(1,1) << " " << ystor(2,1) << " "
@@ -1012,20 +1024,20 @@ public:
       }
     
       guessdone=false;
-      for(i=2;guessdone==false && i<=ngrid;i++) {
+      for(int i=2;guessdone==false && i<=ngrid;i++) {
 	xstor[i]=xstor[i-1]+dx;
       
-	for(j=1;j<=4;j++) {
+	for(int j=1;j<=4;j++) {
 	  y[j]=ystor(j,i-1);
 	}
 	derivs(xstor[i-1],y,dydx);
-	for(j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j];
+	for(int j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j];
       
 	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
 	  guessdone=true;
 	  ilast=i-1;
 	  i=ngrid+10;
-	} else if (debug) {
+	} else if (debug>0) {
 	  cout.width(3);
 	  cout << i << " " 
 	       << xstor[i] << " " << ystor(1,i) << " " << ystor(2,i) << " "
@@ -1033,26 +1045,25 @@ public:
 	}
       }
 
-      // If ilast wasn't set, then assume the whole guess is good
+      // If ilast wasn't set, then nn and np never became smaller than
+      // nndrip or npdrip. In that case, just use the entire guess.
       if (ilast==0) ilast=100;
     
       //----------------------------------------------
       // Arrange guess into relaxation arrays and
       // stretch the solution to grid size=ngrid
 
-      if (debug) cout << "ilast: " << ilast << " " << nndrip << endl;
-      
       rel->x[1]=xstor[1];
       rel->x[ngrid]=xstor[ilast];
-      for(i=2;i<ngrid;i++) {
+      for(int i=2;i<ngrid;i++) {
 	rel->x[i]=rel->x[1]+((double)(i-1))/((double)(ngrid-1))*
 	  (rel->x[ngrid]-rel->x[1]);
       }
       interpi=1;
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	while(rel->x[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
 	while(rel->x[i]<xstor[interpi] && interpi>1) interpi--;
-	for(j=1;j<=4;j++) {
+	for(int j=1;j<=4;j++) {
 	  rel->y(j,i)=ystor(j,interpi)+
 	    (ystor(j,interpi+1)-ystor(j,interpi))*
 	    (rel->x[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
@@ -1061,7 +1072,7 @@ public:
 	rel->x[i]=((double)(i-1))/((double)(ngrid-1));
       }
 
-      if (debug) {
+      if (debug>1) {
 	cout.precision(4);
 	for(int iz=1;iz<=ngrid;iz++) {
 	  cout.width(3);
@@ -1080,9 +1091,9 @@ public:
       //----------------------------------------------
       // Use last solution for guess
     
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	rel->x[i]=xg1[i];
-	for(j=1;j<=rel->ne;j++) {
+	for(int j=1;j<=rel->ne;j++) {
 	  rel->y(j,i)=yg1[j][i];
 	}
       }
@@ -1093,16 +1104,14 @@ public:
     // Solve
 
     rhsmode=false;
-    cout << "Going to rel->solve()." << endl;
-    relret1=rel->solve(relaxconverge,1.0);
-    cout << "Done in rel->solve()." << endl;
+    int relret1=rel->solve(relaxconverge,1.0);
   
     //----------------------------------------------
     // Copy solution for next guess
 
-    for(i=1;i<=ngrid;i++) {
+    for(int i=1;i<=ngrid;i++) {
       xg1[i]=rel->x[i];
-      for(j=1;j<=rel->ne;j++) {
+      for(int j=1;j<=rel->ne;j++) {
 	yg1[j][i]=rel->y(j,i);
       }
     }
@@ -1110,7 +1119,7 @@ public:
     //----------------------------------------------
     // Rescale solution
 
-    for(i=1;i<=rel->ngrid;i++) {
+    for(int i=1;i<=rel->ngrid;i++) {
       rel->x[i]=rel->x[i]*rel->y(5,i);
     }
 
@@ -1137,9 +1146,9 @@ public:
     //----------------------------------------------
     // Store solution and delete seminf_nr_relax
 
-    for(i=1;i<=ngrid;i++) {
+    for(int i=1;i<=ngrid;i++) {
       at.set(0,i-1,rel->x[i]);
-      for(j=1;j<=5;j++) {
+      for(int j=1;j<=5;j++) {
 	at.set(j,i-1,rel->y(j,i));
       }
     }
@@ -1162,14 +1171,14 @@ public:
 	// Construct a simple linear guess
       
 	if (npdrip==0.0) {
-	  for(i=1;i<=ngrid;i++) {
+	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
 	    rel->y(1,i)=(nnrhs-nndrip)*(1.0-rel->x[i])+nndrip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
 	    rel->y(3,i)=0.001;
 	  }
 	} else {
-	  for(i=1;i<=ngrid;i++) {
+	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
 	    rel->y(1,i)=(nprhs-npdrip)*(1.0-rel->x[i])+npdrip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
@@ -1180,9 +1189,9 @@ public:
 	//----------------------------------------------
 	// Use last solution for guess
       
-	for(i=1;i<=ngrid;i++) {
+	for(int i=1;i<=ngrid;i++) {
 	  rel->x[i]=xg2[i];
-	  for(j=1;j<=3;j++) {
+	  for(int j=1;j<=3;j++) {
 	    rel->y(j,i)=yg2[j][i];
 	  }
 	}
@@ -1197,7 +1206,7 @@ public:
 
       if (nndrip>0.0) {
 	cout << "Rhs length: " << rhslength << endl;
-	relret2=rel->solve(relaxconverge,1.0);
+	int relret2=rel->solve(relaxconverge,1.0);
 
 	while (-rel->y(2,ngrid)>1.0e-4) {
 	  rhslength*=1.2;
@@ -1206,15 +1215,15 @@ public:
 	  relret2=rel->solve(relaxconverge,1.0);
 	}
       } else {
-	relret2=rel->solve(relaxconverge,1.0);
+	int relret2=rel->solve(relaxconverge,1.0);
       }
     
       //----------------------------------------------
       // Copy solution for next guess
 
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	xg2[i]=rel->x[i];
-	for(j=1;j<=3;j++) {
+	for(int j=1;j<=3;j++) {
 	  yg2[j][i]=rel->y(j,i);
 	}
       }
@@ -1222,9 +1231,9 @@ public:
       //----------------------------------------------
       // Store solution and delete seminf_nr_relax
 
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	at.set(0,i+ngrid-2,rel->x[i]);
-	for(j=1;j<=3;j++) {
+	for(int j=1;j<=3;j++) {
 	  at.set(j,i+ngrid-2,rel->y(j,i));
 	}
       }
@@ -1234,7 +1243,7 @@ public:
       // Rearrangment and rescaling
   
       if (npdrip==0.0) {
-	for(i=ngrid-1;i<2*ngrid-1;i++) {
+	for(int i=ngrid-1;i<2*ngrid-1;i++) {
 	  at.set(5,i,at.get(3,i));
 	  at.set(4,i,0.0);
 	  at.set(3,i,at.get(2,i));
@@ -1242,7 +1251,7 @@ public:
 	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
 	}
       } else {
-	for(i=1;i<=rel->ngrid;i++) {
+	for(int i=1;i<=rel->ngrid;i++) {
 	  at.set(5,i,at.get(3,i));
 	  at.set(4,i,at.get(2,i));
 	  at.set(3,i,0.0);
@@ -1263,7 +1272,7 @@ public:
   double solve_qnn_equal_qnp(double lmonfact) {
     bool guessdone, debug=false;
     double dx, y[5], dydx[5], xrhs;
-    int i, j, ilast=0, interpi;
+    int ilast=0, interpi;
     ofstream itout;
     char ch;
     ubvector sx(3), sy(3);
@@ -1287,7 +1296,7 @@ public:
       dx=initialstep/((double)ngrid);
     
       guessdone=false;
-      for(i=2;guessdone==false && i<=ngrid;i++) {
+      for(int i=2;guessdone==false && i<=ngrid;i++) {
 	xstor[i]=xstor[i-1]+dx;
       
 	sx[1]=(1.0-rp.protfrac)*ystor(1,i-1);
@@ -1317,15 +1326,15 @@ public:
     
       rel->x[1]=xstor[1];
       rel->x[ngrid]=xstor[ilast];
-      for(i=2;i<ngrid;i++) {
+      for(int i=2;i<ngrid;i++) {
 	rel->x[i]=rel->x[1]+((double)(i-1))/((double)(ngrid-1))*
 	  (rel->x[ngrid]-rel->x[1]);
       }
       interpi=1;
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	while(rel->x[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
 	while(rel->x[i]<xstor[interpi] && interpi>1) interpi--;
-	for(j=1;j<=2;j++) {
+	for(int j=1;j<=2;j++) {
 	  rel->y(j,i)=ystor(j,interpi)+
 	    (ystor(j,interpi+1)-ystor(j,interpi))*
 	    (rel->x[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
@@ -1339,9 +1348,9 @@ public:
       //----------------------------------------------
       // Use last solution for guess
     
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	rel->x[i]=xg1[i];
-	for(j=1;j<=rel->ne;j++) {
+	for(int j=1;j<=rel->ne;j++) {
 	  rel->y(j,i)=yg1[j][i];
 	}
       }
@@ -1351,14 +1360,14 @@ public:
     // Solve
 
     rhsmode=false;
-    relret1=rel->solve(relaxconverge,1.0);
+    int relret1=rel->solve(relaxconverge,1.0);
   
     //----------------------------------------------
     // Copy solution for next guess
 
-    for(i=1;i<=ngrid;i++) {
+    for(int i=1;i<=ngrid;i++) {
       xg1[i]=rel->x[i];
-      for(j=1;j<=rel->ne;j++) {
+      for(int j=1;j<=rel->ne;j++) {
 	yg1[j][i]=rel->y(j,i);
       }
     }
@@ -1368,7 +1377,7 @@ public:
     // densities:
 
     at.set_nlines(ngrid);
-    for(i=1;i<=rel->ngrid;i++) {
+    for(int i=1;i<=rel->ngrid;i++) {
 
       sx[1]=(1.0-rp.protfrac)*rel->y(1,i);
       sx[2]=rp.protfrac*rel->y(1,i);
@@ -1425,14 +1434,14 @@ public:
 	// Construct a simple linear guess
       
 	if (npdrip==0.0) {
-	  for(i=1;i<=ngrid;i++) {
+	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
 	    rel->y(1,i)=(nnrhs-nndrip)*(1.0-rel->x[i])+nndrip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
 	    rel->y(3,i)=0.001;
 	  }
 	} else {
-	  for(i=1;i<=ngrid;i++) {
+	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
 	    rel->y(1,i)=(nprhs-npdrip)*(1.0-rel->x[i])+npdrip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
@@ -1443,9 +1452,9 @@ public:
 	//----------------------------------------------
 	// Use last solution for guess
       
-	for(i=1;i<=ngrid;i++) {
+	for(int i=1;i<=ngrid;i++) {
 	  rel->x[i]=xg2[i];
-	  for(j=1;j<=rel->ne;j++) {
+	  for(int j=1;j<=rel->ne;j++) {
 	    rel->y(j,i)=yg2[j][i];
 	  }
 	}
@@ -1456,14 +1465,14 @@ public:
       // Solve
     
       rhsmode=true;
-      relret2=rel->solve(relaxconverge,1.0);
+      int relret2=rel->solve(relaxconverge,1.0);
     
       //----------------------------------------------
       // Copy solution for next guess
     
-      for(i=1;i<=ngrid;i++) {
+      for(int i=1;i<=ngrid;i++) {
 	xg2[i]=rel->x[i];
-	for(j=1;j<=rel->ne;j++) {
+	for(int j=1;j<=rel->ne;j++) {
 	  yg2[j][i]=rel->y(j,i);
 	}
       }
@@ -1472,7 +1481,7 @@ public:
       // Store solution, rescale, and delete seminf_nr_relax
     
       at.set_nlines(2*ngrid-1);
-      for(i=1;i<=rel->ngrid;i++) {
+      for(int i=1;i<=rel->ngrid;i++) {
 	at.set(5,i-2+ngrid,rel->y(3,i));
 	at.set(3,i-2+ngrid,rel->y(2,i));
 	at.set(4,i-2+ngrid,0.0);
@@ -1559,6 +1568,36 @@ public:
     return 0;
   }
 
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double derivs2(size_t ieq, double x, ubmatrix_row &y) {
+    ubvector y2=y, dydx(6);
+    derivs(x,y2,dydx);
+    return dydx[ieq];
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double left2(size_t ieq, double x, ubmatrix_row &y) {
+
+    ubvector y2=y, dydx(6);
+    derivs(x,y2,dydx);
+    
+    double delta=rp.nn0*monfact/exp(big*expo);
+    double epsi=delta*(-rp.dmundn+rp.qnn*expo*expo)/
+      (rp.dmundp-rp.qnp*expo*expo);
+    
+    if (ieq==0) return y[1]-(rp.nn0-delta*exp(big*expo));
+    else if (ieq==1) return y[2]-(rp.np0-epsi*exp(big*expo));
+    else if (ieq==2) return y[3]+delta*expo*exp(big*expo);
+    return y[4]+epsi*expo*exp(big*expo);
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double right2(size_t ieq, double x, ubmatrix_row &y) {
+    return y[2];
+  }
   
 };
 
@@ -1574,19 +1613,17 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
   ofstream itout;
   char s1[80];
 
-  int i,j;
-
   //--------------------------------------------
   // Output relaxation steps to file
   
-  if (true || relaxfile) {
+  if (relaxfile) {
     string soutt="rel"+itos(k)+".out"+
       itos(rp->pf_index);
     itout.open(soutt.c_str());
     itout.setf(ios::scientific);
-    for(i=1;i<=ngrid;i++) {
+    for(int i=1;i<=ngrid;i++) {
       itout << x[i] << " ";
-      for(j=1;j<=ne;j++) itout << (y)(j,i) << " ";
+      for(int j=1;j<=ne;j++) itout << (y)(j,i) << " ";
       itout << endl;
     }
     itout.close();
@@ -1602,7 +1639,11 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
     if (k>=1 && k<=itmax) {
       cout << "\t" << k << "  \t" << err << "  \t" << y(3,1) << " ";
       ubmatrix_row amc(y,1);
-      cout << snp->lookup(ngrid,y(1,1)/2.0,x,amc) << " " 
+      std::vector<double> amc2;
+      std::vector<double> x2;
+      vector_copy(amc,amc2);
+      vector_copy(x,x2);
+      cout << snp->lookup(ngrid,y(1,1)/2.0,x2,amc2) << " " 
 	   << x[ngrid] << endl;
     }
   }
@@ -1611,7 +1652,7 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
   // Correct if density is negative
   
   if (!rhsmode && !qnn_equals_qnp) {
-    for(i=1;i<=ngrid;i++) {
+    for(int i=1;i<=ngrid;i++) {
       if ((this->y)(1,i)<0.0) (this->y)(3,i)=0.0;
       if ((this->y)(2,i)<0.0) (this->y)(4,i)=0.0;
     }
@@ -1656,7 +1697,6 @@ int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
 int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
 			   int isf) {
 
-  int i;
   double dx, exx;
   ubvector exy(8), exdy(8);
   ubvector sx(4);
@@ -1690,7 +1730,7 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
       s(1,jsf)=sx[1];
     } else {
       dx=x[k]-x[k-1];
-      for(i=1;i<=3;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
+      for(int i=1;i<=3;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
 
       sx[1]=(1.0-rp->protfrac)*exy[1];
       sx[2]=rp->protfrac*exy[1];
@@ -1756,12 +1796,12 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
     } else {
       dx=x[k]-x[k-1];
       
-      for(i=1;i<=5;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
+      for(int i=1;i<=5;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
       exx=(x[k]+x[k-1])/2.0*exy[5];
       
       snp->derivs(exx,exy,exdy);
       exdy[5]=0.0;
-      for(i=1;i<=5;i++) s(i,jsf)=y(i,k)-y(i,k-1)-
+      for(int i=1;i<=5;i++) s(i,jsf)=y(i,k)-y(i,k-1)-
 			  dx*exy[5]*exdy[i];
 
     }
