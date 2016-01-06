@@ -46,6 +46,7 @@
 #include <o2scl/hdf_file.h>
 #include <o2scl/hdf_io.h>
 #include <o2scl/hdf_eos_io.h>
+#include <o2scl/lib_settings.h>
 
 #include "relax.h"
 
@@ -57,7 +58,6 @@ using namespace o2scl_hdf;
 typedef boost::numeric::ublas::vector<double> ubvector;
 typedef boost::numeric::ublas::matrix<double> ubmatrix;
 typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
-typedef int (*mm_funct)(size_t, const ubvector &, ubvector &);
 
 //--------------------------------------------
 // Random global variables
@@ -80,10 +80,6 @@ double nnrhs;
 double nprhs;
 double rhslength;
 
-double lookup(int n, double y0, const ubvector &x, const ubvector &y);
-int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy);
-int derivs(double sx, const ubvector &sy, ubvector &dydx);
-
 //--------------------------------------------
 // Structure for relax parameters
 
@@ -92,7 +88,7 @@ typedef struct relaxp_s {
   bool showrelax;
   double dndnl, dndnr, dndpl, dndpr, dpdnl, dpdnr, dpdpl, dpdpr;
   double lex1, lex2, rex1, rex2, dmundn, barn, dmundp, nsat, protfrac;
-  int iii;
+  int pf_index;
   eos_had_base *eos;
   fermion n, p;
   thermo hb;
@@ -106,13 +102,15 @@ class seminf_nr_relax : public relax {
 
 public:
 
+  relaxp *rp;
+  
   int ctr;
 
   double errold;
   
   seminf_nr_relax(int tne, int tnb, int tngrid);
   
-  int iter(int k, double err, double fac, int *kmax, ubvector &errmax);
+  int iter(int k, double err, double fac, ubvector_int &kmax, ubvector &errmax);
 
   int difeq(int k, int k1, int k2, int jsf, int is1, int isf);
   
@@ -153,15 +151,11 @@ public:
   eos_had_potential eosg;
   deriv_gsl<> df;
   seminf_nr_relax *rel;
+  relaxp rp;
   
   //--------------------------------------------
   // Function prototypes
   
-  //double monfun(double sx);
-  //double monfun2(double sx);
-  //int ndripfun(size_t sn, const ubvector &sx, ubvector &sy);
-  //int pdripfun(size_t sn, const ubvector &sx, ubvector &sy);
-
   int run(int argc, char *argv[]) {
 
     snp=this;
@@ -172,8 +166,7 @@ public:
     ubvector sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0, xn[4], xp[4];
     double thick;
-    int i, iii, choice, ngl=32, j, npf;
-    ifstream parin, guess; 
+    int i, pf_index, choice, ngl=32, j, npf;
     ofstream fout;
     double lon, lop, hin, hip, sqt;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
@@ -184,13 +177,10 @@ public:
     inte_qag_gsl<> gl;
     eos_had_skyrme eoss;
     eos_had_schematic eosp;
-    relaxp rp;
 
     if (argc<2) {
       cout << "Need directory name." << endl;
       exit(-1);
-    } else if (argc==3) {
-      cout << "Reading inital guess from file: " << argv[2] << endl;
     }
     dirname=argv[1];
 
@@ -204,111 +194,32 @@ public:
     //--------------------------------------------
     // Get model parameters
 
-    //if (word_io.get_def(pa,"model",model)!=0) model="skyrme";
     model="skyrme";
 
-    skyrme_load(eoss,"SLy4");
+    if (model==((string)"skyrme")) {
 
-    /*
-      if (model=="skyrme" || model=="hcskyrme") {
-      eoss=new eos_had_skyrme;
-      rp.eos=eoss;
-      if (model=="skyrme") {
-      cout << "Skyrme EOS" << endl;
-      double_io.get_def(pa,"t0",eoss->t0);
-      double_io.get_def(pa,"t1",eoss->t1);
-      double_io.get_def(pa,"t2",eoss->t2);
-      double_io.get_def(pa,"t3",eoss->t3);
-      eoss->t0/=hc_mev_fm;
-      eoss->t1/=hc_mev_fm;
-      eoss->t2/=hc_mev_fm;
-      eoss->t3/=hc_mev_fm;
-      double_io.get_def(pa,"x0",eoss->x0);
-      double_io.get_def(pa,"x1",eoss->x1);
-      double_io.get_def(pa,"x2",eoss->x2);
-      double_io.get_def(pa,"x3",eoss->x3);
-      double_io.get_def(pa,"a",eoss->a);
-      double_io.get_def(pa,"b",eoss->b);
-      double_io.get_def(pa,"alpha",eoss->alpha);
-      } else {
-      cout << "Hard-coded Skyrme EOS" << endl;
-      if (word_io.get_def(pa,"hcmodel",hcmodel)!=0) {
-      cout << "No hard-coded model specified." << endl;
-      exit(-1);
-      } else {
-      eoss->load(hcmodel);
-      }
-      }
-    
-      text_out_file tout(&cout);
-      pa.fout(&tout);
-
-      rp.qnn=0.1875*(eoss->t1*(1.0-eoss->x1)-eoss->t2*(1.0+eoss->x2));
+      rp.eos=&eoss;
+      skyrme_load(eoss,"NRAPR");
+      
+      // Determine values of Q_{nn}, Q_{pp}, and Q_{np}
+      rp.qnn=0.1875*(eoss.t1*(1.0-eoss.x1)-eoss.t2*(1.0+eoss.x2));
       rp.qpp=rp.qnn;
-      rp.qnp=0.125*(3.0*eoss->t1*(1.0+eoss->x1/2.0)-
-      eoss->t2*(1.0+eoss->x2/2.0));
-
-      if (bool_io.get_def(pa,"xpb",xpb)!=0) xpb=false;
-
-    */
-  
-    //} else if (model=="schematic") {
-
-    /*
-      cout << "Schematic EOS" << endl;
-      eosp=new eos_had_schematic;
-      rp.eos=eosp;
-      double_io.get_def(pa,"eoa",eosp->eoa);
-      if (double_io.get_def(pa,"kprime",eosp->kprime)!=0) eosp->kprime=0.0;
-      double_io.get_def(pa,"comp",eosp->comp);
-      double_io.get_def(pa,"esym",eosp->esym);
-      eosp->eoa/=hc_mev_fm;
-      eosp->kprime/=hc_mev_fm;
-      eosp->comp/=hc_mev_fm;
-      eosp->esym/=hc_mev_fm;
-      eosp->b=eosp->esym;
-      eosp->a=0.0;
-    */
-
-    /*
-      double_io.get_def(pa,"n0",eosp->n0);
-      double_io.get_def(pa,"qnn",rp.qnn);
-      double_io.get_def(pa,"qnp",rp.qnp);
-      double_io.get_def(pa,"qpp",rp.qpp);
-      rp.qnn/=hc_mev_fm;
-      rp.qnp/=hc_mev_fm;
-      rp.qpp/=hc_mev_fm;
-    */
-  
-    /*
-      } else if (model=="apr") {
-      cout << "APR EOS" << endl;
-      rp.eos=eosa;
-      if (int_io.get_def(pa,"choice",choice)!=0) choice=1;
-      eosa->select(choice);
-
-      } else if (model=="gp") {
-      cout << "General Potential EOS" << endl;
-      eosg=new eos_had_potential;
-      rp.eos=eosg;
-      double_io.get_def(pa,"x",eosg.x,0.0);
-      double_io.get_def(pa,"Au",eosg.Au,-95.98/hc_mev_fm);
-      double_io.get_def(pa,"Al",eosg.Al,-120.57/hc_mev_fm);
-      double_io.get_def(pa,"rho0",eosg.rho0,0.16);
-      double_io.get_def(pa,"B",eosg.B,106.35/hc_mev_fm);
-      double_io.get_def(pa,"sigma",eosg.sigma,4.0/3.0);
-      double_io.get_def(pa,"Cl",eosg.Cl,-11.70/hc_mev_fm);
-      double_io.get_def(pa,"Cu",eosg.Cu,-103.40/hc_mev_fm);
-      double_io.get_def(pa,"Lambda",eosg.Lambda,cbrt(1.5*pi2*0.16));
-      eosg.form=eosg.mdi_form;
-      } else {
+      rp.qnp=0.125*(3.0*eoss.t1*(1.0+eoss.x1/2.0)-
+      eoss.t2*(1.0+eoss.x2/2.0));
+      
+    } else if (model==((string)"schematic")) {
+      rp.eos=&eosp;
+    } else if (model==((string)"apr")) {
+      rp.eos=&eosa;
+    } else if (model==((string)"gp")) {
+      rp.eos=&eosg;
+    } else {
       cout << "Unknown EOS" << endl;
       exit(-1);
-      }
-    */
+    }
   
     //--------------------------------------------
-    //
+    // Test if Qnn=Qnp
 
     if (model!="gp" && model!="apr" && fabs(rp.qnn-rp.qnp)<1.0e-7) {
       qnn_equals_qnp=true;
@@ -327,47 +238,11 @@ public:
     flatden=false;
 
     //--------------------------------------------
-    // Rearrange memory for relaxation
 
     at.set_nlines(ngrid*2);
     at.line_of_names(((string)"x nn np nnp npp scale rho alpha ")+
 		      "ebulk egrad esurf thickint wdint wd2int");
 
-    /*
-    rho.resize(ngrid+1);
-    alpha.resize(ngrid+1);
-    ebulk.resize(ngrid+1);
-    egrad.resize(ngrid+1);
-    esurf.resize(ngrid+1);
-    thickint.resize(ngrid+1);
-    wdint.resize(ngrid+1);
-    wd2int.resize(ngrid+1);
-    .resize(ngrid+1);
-    rho.resize(ngrid+1);
-    rho.resize(ngrid+1);
-    rho.resize(ngrid+1);
-    */
-
-    /*
-    rho=&at.get_column("rho");
-    alpha=&at.get_column("alpha");
-    ebulk=&at.get_column("ebulk");
-    egrad=&at.get_column("egrad");
-    esurf=&at.get_column("esurf");
-    thickint=&at.get_column("thickint");
-    wdint=&at.get_column("wdint");
-    wd2int=&at.get_column("wd2int");
-
-    if (model=="apr" || model=="gp") {
-      at.new_column("qnn");
-      at.new_column("qnp");
-      at.new_column("qpp");
-      vqnn=&at.get_column("qnn");
-      vqnp=&at.get_column("qnp");
-      vqpp=&at.get_column("qpp");
-    }
-    */
-  
     xstor.resize(ngrid+1);
     ystor.resize(5+1,ngrid+1);
 
@@ -380,42 +255,34 @@ public:
     rhsmin=1.0e-7;
     monfact=0.002;
 
-    rp.n.init(939.0/hc_mev_fm,2.0);
-    rp.p.init(939.0/hc_mev_fm,2.0);
+    rp.n.init(o2scl_settings.get_convert_units().convert
+	      ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
+    rp.p.init(o2scl_settings.get_convert_units().convert
+	      ("kg","1/fm",o2scl_mks::mass_proton),2.0);
     rp.n.non_interacting=false;
     rp.p.non_interacting=false;
     rp.eos->set_n_and_p(rp.n,rp.p);
     rp.eos->set_thermo(rp.hb);
-    rp.n0half=rp.eos->fn0(0.5,dtemp);
+
+    // Compute saturation density
+    rp.n0half=rp.eos->fn0(0.0,dtemp);
     double r0=cbrt(0.75/pi/rp.n0half);
 
-    /*
-      if (xpb==true) {
-      pflist=new double[2];
-      pflist[0]=0.48;
-      pflist[1]=pbpf;
-      npf=2;
-      } else if (double_io.get(pa,"protfraclist",pflist,npf)!=0) {
-      double_io.get_def(pa,"protfrac",pflist[1]);
-      npf=2;
-      }
-    */
-
     pflist=new double[2];
-    pflist[0]=0.5;
+    pflist[0]=0.45;
+    pflist[1]=0.46;
     npf=2;
   
-    for(iii=1;iii<=npf;iii++) {
-      rp.iii=iii;
-      rp.protfrac=pflist[iii-1];
+    for(pf_index=1;pf_index<=npf;pf_index++) {
+      rp.pf_index=pf_index;
+      rp.protfrac=pflist[pf_index-1];
 
-      //--------------------------------------------
-      // Calculate properties of saturated nuclear 
-      // matter with appropriate value of proton fraction
-      // including the possibility of drip particles
-      // if they exist
-    
-      rp.nsat=rp.eos->fn0(rp.protfrac,dtemp);
+      //------------------------------------------------------
+      // Calculate properties of saturated nuclear matter with
+      // appropriate value of proton fraction including the
+      // possibility of drip particles if they exist
+      
+      rp.nsat=rp.eos->fn0(1.0-2.0*rp.protfrac,dtemp);
       rp.np0=rp.nsat*rp.protfrac;
       rp.nn0=rp.nsat-rp.np0;
       rp.n.n=rp.nn0;
@@ -736,11 +603,13 @@ public:
 
       //--------------------------------------------
       // Solve
-
+      
+      cout << "Going to solver." << endl;
+      
       if (qnn_equals_qnp) {
-	monfun2(monfact);
+	solve_qnn_equal_qnp(monfact);
       } else {
-	monfun(monfact);
+	solve_qnn_neq_qnp(monfact);
       }
 
       //--------------------------------------------
@@ -897,78 +766,6 @@ public:
 	  }
 	}
       }
-
-#ifdef REMOVING_OLD_OUTPUT
-    
-      //--------------------------------------------
-      // Make solution output file
-    
-      table_io.out_one(((string)argc[1])+"/final.out"+itos(iii),
-		       "at",at);
-    
-      //--------------------------------------------
-      // Make summary output file
-
-      cout << "Summary output." << endl;
-      string soutt=((string)argc[1])+"/sisum.out"+itos(iii);
-      fout.open(soutt.c_str());
-      fout.setf(ios::scientific);
-      fout << "int relret1 " << relret1 << endl;
-      fout << "int relret2 " << relret2 << endl;
-      fout << "double nsat " << rp.nsat << endl;
-      fout << "double nn0 " << rp.nn0 << endl;
-      fout << "double np0 " << rp.np0 << endl;
-      fout << "double mun " << rp.mun << endl;
-      fout << "double mup " << rp.mup << endl;
-      if (model!="apr" && model!="gp") {
-	fout << "double qnn " << rp.qnn << endl;
-	fout << "double qpp " << rp.qpp << endl;
-	fout << "double qnp " << rp.qnp << endl;
-      }
-      fout << "double nnp " << at[3][1] << endl;
-      fout << "double npp " << at[4][1] << endl;
-      fout << "double Tn " << xn[1]-xn[3] << endl;
-      fout << "double Tp " << xp[1]-xp[3] << endl;
-      fout << "double XnXp " << xn[2]-xp[2] << endl;
-      fout << "double XnXp2 " << thick << endl;
-      fout << "double surf " << surf << endl;
-      fout << "double sbulk " << sbulk << endl;
-      fout << "double sgrad " << sgrad << endl;
-      fout << "double lex1 " << rp.lex1 << endl;
-      fout << "double lex2 " << rp.lex2 << endl;
-      fout << "double expo " << expo << endl;
-      fout << "double rex1 " << rp.rex1 << endl;
-      fout << "double rex2 " << rp.rex2 << endl;
-      fout << "double monfact " << monfact << endl;
-      fout << "double nnrhs " << nnrhs << endl;
-      fout << "double nprhs " << nprhs << endl;
-      fout << "double rhsmin " << rhsmin << endl;
-      fout << "double nndrip " << nndrip << endl;
-      fout << "double npdrip " << npdrip << endl;
-
-      rp.barn=rp.n0half;
-      fout << "double esym_n0 " << rp.eos->fesym(rp.n0half) << endl;
-      fout << "double esym_ns " << hns << endl;
-
-      fout << "bool xpb " << xpb << endl;
-      if (xpb==true && iii==2) {
-	fout << "double pbpf " << pbpf << endl;
-      }
-      if (fabs(rp.protfrac-0.5)>1.0e-8) {
-	fout << "double wd_droplet " << wd << endl;
-	fout << "double wd_droplet2 " << wd2 << endl;
-	fout << "double wdjl " << wdjl << endl;
-	fout << "double w0jl " << w0jl << endl;
-	fout << "double sssv_drop " << sssv_drop << endl;
-	fout << "double sssv_jim " << sssv_jim << endl;
-      }
-      fout << "double protfrac " << rp.protfrac << endl;
-      fout << "bool flatden " << flatden << endl;
-
-      fout.close();
-
-#endif
-    
     }
   
     return 0;
@@ -989,25 +786,24 @@ public:
   }
 
   int derivs(double sx, const ubvector &sy, ubvector &dydx) {
-    relaxp *rp;//=(relaxp *)pa;
     double rhsn, rhsp=0.0, det;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
 
-    rp->n.n=sy[1];
-    rp->p.n=sy[2];
+    rp.n.n=sy[1];
+    rp.p.n=sy[2];
     if (model=="apr") {
-      eosa.gradient_qij2(rp->n.n,rp->p.n,rp->qnn,rp->qnp,rp->qpp,
+      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
 			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
     }
     if (model=="gp") {
       thermo thth;
       if (false) {
-	eosg.gradient_qij(rp->n,rp->p,thth,rp->qnn,rp->qnp,rp->qpp,
+	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
       } else {
-	rp->qnn=100.0/hc_mev_fm;
-	rp->qpp=100.0/hc_mev_fm;
-	rp->qnp=90.0/hc_mev_fm;
+	rp.qnn=100.0/hc_mev_fm;
+	rp.qpp=100.0/hc_mev_fm;
+	rp.qnp=90.0/hc_mev_fm;
 	dqnndnn=0.0;
 	dqnndnp=0.0;
 	dqnpdnn=0.0;
@@ -1017,30 +813,30 @@ public:
       }
     }
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
     /*
-      double mun=rp->n.mu, mup=rp->p.mu, msn=rp->n.ms, msp=rp->p.ms;
-      double hed=rp->hb->ed, hpr=rp->hb->pr, part;
-      if (rp->iii==1) part=1000.0;
-      else if (rp->iii==2) part=100.0;
-      else if (rp->iii==3) part=40.0;
-      else if (rp->iii==4) part=20.0;
-      else if (rp->iii==5) part=5.0;
-      else if (rp->iii==6) part=3.0;
-      else if (rp->iii==7) part=1.0;
+      double mun=rp.n.mu, mup=rp.p.mu, msn=rp.n.ms, msp=rp.p.ms;
+      double hed=rp.hb->ed, hpr=rp.hb->pr, part;
+      if (rp.pf_index==1) part=1000.0;
+      else if (rp.pf_index==2) part=100.0;
+      else if (rp.pf_index==3) part=40.0;
+      else if (rp.pf_index==4) part=20.0;
+      else if (rp.pf_index==5) part=5.0;
+      else if (rp.pf_index==6) part=3.0;
+      else if (rp.pf_index==7) part=1.0;
       else part=0.0;
-      eosa.calc_e(rp->n,rp->p,rp->hb);
+      eosa.calc_e(rp.n,rp.p,rp.hb);
     
-      rp->n.mu=(rp->n.mu*part+mun)/(part+1.0);
-      rp->p.mu=(rp->p.mu*part+mup)/(part+1.0);
-      rp->n.ms=(rp->n.ms*part+msn)/(part+1.0);
-      rp->p.ms=(rp->p.ms*part+msp)/(part+1.0);
-      rp->hb->ed=(rp->hb->ed*part+hed)/(part+1.0);
-      rp->hb->pr=(rp->hb->pr*part+hpr)/(part+1.0);
+      rp.n.mu=(rp.n.mu*part+mun)/(part+1.0);
+      rp.p.mu=(rp.p.mu*part+mup)/(part+1.0);
+      rp.n.ms=(rp.n.ms*part+msn)/(part+1.0);
+      rp.p.ms=(rp.p.ms*part+msp)/(part+1.0);
+      rp.hb->ed=(rp.hb->ed*part+hed)/(part+1.0);
+      rp.hb->pr=(rp.hb->pr*part+hpr)/(part+1.0);
     */
 
-    if (rp->n.n<=0.0) {
-      if (rp->p.n<=0.0) {
+    if (rp.n.n<=0.0) {
+      if (rp.p.n<=0.0) {
 	dydx[1]=0.0;
 	dydx[2]=0.0;
 	dydx[3]=0.0;
@@ -1050,47 +846,47 @@ public:
 	dydx[2]=sy[4];
 	dydx[3]=0.0;
 	if (model!="apr" && model!="gp") {
-	  dydx[4]=(rp->p.mu-rp->mup)/rp->qpp;
+	  dydx[4]=(rp.p.mu-rp.mup)/rp.qpp;
 	} else {
-	  dydx[4]=(rp->p.mu-rp->mup+0.5*dqppdnp*sy[4]*sy[4])/rp->qpp;
+	  dydx[4]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[4]*sy[4])/rp.qpp;
 	}
       }
-    } else if (rp->p.n<=0.0) {
+    } else if (rp.p.n<=0.0) {
       dydx[1]=sy[3];
       dydx[2]=0.0;
       if (model!="apr" && model!="gp") {
-	dydx[3]=(rp->n.mu-rp->mun)/rp->qnn;
+	dydx[3]=(rp.n.mu-rp.mun)/rp.qnn;
       } else {
-	dydx[3]=(rp->n.mu-rp->mun+0.5*dqnndnn*sy[3]*sy[3])/rp->qnn;
+	dydx[3]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[3]*sy[3])/rp.qnn;
       }
       dydx[4]=0.0;
     } else {
       if (rhsmode==false) {
 	if (model!="apr" && model!="gp") {
-	  det=rp->qnn*rp->qpp-rp->qnp*rp->qnp;
-	  rhsn=(rp->n.mu-rp->mun)*rp->qpp-(rp->p.mu-rp->mup)*rp->qnp;
-	  rhsp=(rp->p.mu-rp->mup)*rp->qnn-(rp->n.mu-rp->mun)*rp->qnp;
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
 	  rhsn/=det;
 	  rhsp/=det;
 	} else {
-	  det=rp->qnn*rp->qpp-rp->qnp*rp->qnp;
-	  rhsn=(rp->n.mu-rp->mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
-		dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp->qpp-
-	    (rp->p.mu-rp->mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
-	     dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp->qnp;
-	  rhsp=(rp->p.mu-rp->mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
-		dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp->qnn-
-	    (rp->n.mu-rp->mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
-	     dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp->qnp;
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
+		dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp.qpp-
+	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
+	     dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
+		dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp.qnn-
+	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
+	     dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp.qnp;
 	  rhsn/=det;
 	  rhsp/=det;
 	}
       } else {
 	if (model!="apr" && model!="gp") {
-	  rhsn=(rp->n.mu-rp->mun)/rp->qnn;
+	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
 	  rhsp=0.0;
 	} else {
-	  rhsn=(rp->n.mu-rp->mun+0.5*dqnndnn*sy[3]*sy[3])/rp->qnn;
+	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[3]*sy[3])/rp.qnn;
 	  rhsp=0.0;
 	}
       }
@@ -1116,9 +912,8 @@ public:
     return 0;
   }
 
-  double monfun(double lmonfact) {
-    relaxp *rp;//=(relaxp *)pa;
-    bool guessdone, debug=false;
+  double solve_qnn_neq_qnp(double lmonfact) {
+    bool guessdone, debug=true;
     double dx, xrhs, delta, epsi;
     ubvector y(5), dydx(5);
     int i, j, ilast=0, interpi;
@@ -1133,19 +928,22 @@ public:
     if (flatden) rel=new seminf_nr_relax(5,3,ngrid);
     else rel=new seminf_nr_relax(5,4,ngrid);
     rel->itmax=100;
+    rel->rp=&rp;
 
-    if (rp->iii==1) {
+    if (rp.pf_index==1) {
+
       //----------------------------------------------
       // Construct a guess by shooting
     
       xstor[1]=0.0;
-      ystor(1,1)=rp->nn0;
-      ystor(2,1)=rp->np0;
+      ystor(1,1)=rp.nn0;
+      ystor(2,1)=rp.np0;
       ystor(3,1)=firstderiv;
       ystor(4,1)=firstderiv;
       dx=initialstep/((double)ngrid);
     
       if (debug) {
+	cout.width(3);
 	cout << 1 << " " 
 	     << xstor[1] << " " << ystor(1,1) << " " << ystor(2,1) << " "
 	     << ystor(3,1) << " " << ystor(4,1) << endl;
@@ -1166,6 +964,7 @@ public:
 	  ilast=i-1;
 	  i=ngrid+10;
 	} else if (debug) {
+	  cout.width(3);
 	  cout << i << " " 
 	       << xstor[i] << " " << ystor(1,i) << " " << ystor(2,i) << " "
 	       << ystor(3,i) << " " << ystor(4,i) << endl;
@@ -1195,9 +994,10 @@ public:
 	rel->x[i]=((double)(i-1))/((double)(ngrid-1));
       }
 
-      if (false) {
+      if (debug) {
+	cout.precision(4);
 	for(int iz=1;iz<=ngrid;iz++) {
-	  cout.precision(4);
+	  cout.width(3);
 	  cout << iz << " " << rel->x[iz] << " " 
 	       << rel->y(1,iz) << " " 
 	       << rel->y(2,iz) << " " 
@@ -1205,9 +1005,11 @@ public:
 	       << rel->y(4,iz) << " " 
 	       << rel->y(5,iz) << endl;
 	}
+	cout.precision(6);
       }
     
     } else {
+
       //----------------------------------------------
       // Use last solution for guess
     
@@ -1224,7 +1026,9 @@ public:
     // Solve
 
     rhsmode=false;
+    cout << "Going to rel->solve()." << endl;
     relret1=rel->solve(relaxconverge,1.0);
+    cout << "Done in rel->solve()." << endl;
   
     //----------------------------------------------
     // Copy solution for next guess
@@ -1278,14 +1082,15 @@ public:
     //----------------------------------------------
     // RHS
     
-    if (fabs(rp->protfrac-0.5)>1.0e-4) {
+    if (fabs(rp.protfrac-0.5)>1.0e-4) {
 
       at.set_nlines(ngrid*2-1);
 
       rel=new seminf_nr_relax(3,1,ngrid);
       rel->itmax=100;
+      rel->rp=&rp;
 
-      if (rp->iii==1) {
+      if (rp.pf_index==1) {
 	//----------------------------------------------
 	// Construct a simple linear guess
       
@@ -1386,8 +1191,7 @@ public:
 
   }
 
-  double monfun2(double lmonfact) {
-    relaxp *rp;//=(relaxp *)pa;
+  double solve_qnn_equal_qnp(double lmonfact) {
     bool guessdone, debug=false;
     double dx, y[5], dydx[5], xrhs;
     int i, j, ilast=0, interpi;
@@ -1402,13 +1206,14 @@ public:
 
     rel=new seminf_nr_relax(3,2,ngrid);
     rel->itmax=200;
+    rel->rp=&rp;
 
     //----------------------------------------------
     // Construct a guess by shooting
 
-    if (rp->iii==1) {
+    if (rp.pf_index==1) {
       xstor[1]=0.0;
-      ystor(1,1)=rp->nn0+rp->np0;
+      ystor(1,1)=rp.nn0+rp.np0;
       ystor(2,1)=firstderiv;
       dx=initialstep/((double)ngrid);
     
@@ -1416,9 +1221,9 @@ public:
       for(i=2;guessdone==false && i<=ngrid;i++) {
 	xstor[i]=xstor[i-1]+dx;
       
-	sx[1]=(1.0-rp->protfrac)*ystor(1,i-1);
-	sx[2]=rp->protfrac*ystor(1,i-1);
-	rp->barn=ystor(1,i-1);
+	sx[1]=(1.0-rp.protfrac)*ystor(1,i-1);
+	sx[2]=rp.protfrac*ystor(1,i-1);
+	rp.barn=ystor(1,i-1);
 	mm_funct11 qqf=std::bind
 	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
 	   (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
@@ -1426,7 +1231,7 @@ public:
 	nd.msolve(2,sx,qqf);
       
 	ystor(1,i)=ystor(1,i-1)+dx*ystor(2,i-1);
-	ystor(2,i)=ystor(2,i-1)+dx*(rp->n.mu-rp->mun)/(rp->qnn);
+	ystor(2,i)=ystor(2,i-1)+dx*(rp.n.mu-rp.mun)/(rp.qnn);
       
 	if (sx[2]<nndrip+npdrip+1.0e-6 || ystor(2,i)>0.0) {
 	  guessdone=true;
@@ -1494,10 +1299,10 @@ public:
     at.set_nlines(ngrid);
     for(i=1;i<=rel->ngrid;i++) {
 
-      sx[1]=(1.0-rp->protfrac)*rel->y(1,i);
-      sx[2]=rp->protfrac*rel->y(1,i);
+      sx[1]=(1.0-rp.protfrac)*rel->y(1,i);
+      sx[2]=rp.protfrac*rel->y(1,i);
 
-      rp->barn=rel->y(1,i);
+      rp.barn=rel->y(1,i);
       mm_funct11 qqf=std::bind
 	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
 	   (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
@@ -1540,10 +1345,11 @@ public:
     //---------------------------------------------
     // RHS
     
-    if (fabs(rp->protfrac-0.5)>1.0e-4) {
+    if (fabs(rp.protfrac-0.5)>1.0e-4) {
       rel=new seminf_nr_relax(3,1,ngrid);
+      rel->rp=&rp;
     
-      if (rp->iii==1) {
+      if (rp.pf_index==1) {
 	//----------------------------------------------
 	// Construct a simple linear guess
       
@@ -1611,40 +1417,38 @@ public:
   }
 
   int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    relaxp *rp;//=(relaxp *)pa;
 
-    rp->n.n=sx[1];
-    rp->p.n=sx[2];
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
     if (sx[1]<0.0 || sx[2]<0.0) return 1;
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
 
-    sy[1]=rp->n.n+rp->p.n-rp->barn;
-    sy[2]=rp->n.mu-rp->p.mu-rp->mun+rp->mup;
+    sy[1]=rp.n.n+rp.p.n-rp.barn;
+    sy[2]=rp.n.mu-rp.p.mu-rp.mun+rp.mup;
 
     return 0;
   }
 
   int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    relaxp *rp;//=(relaxp *)pa;
     double pleft, pright, munleft, munright;
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
 
-    rp->n.n=sx[1];
-    rp->p.n=sx[2];
-    sy[1]=rp->p.n-rp->protfrac*(rp->p.n+rp->n.n);
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
+    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
-    pleft=rp->hb.pr;
-    munleft=rp->n.mu;
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pleft=rp.hb.pr;
+    munleft=rp.n.mu;
 
-    rp->n.n=sx[3];
-    rp->p.n=0.0;
+    rp.n.n=sx[3];
+    rp.p.n=0.0;
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
-    pright=rp->hb.pr;
-    munright=rp->n.mu;
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pright=rp.hb.pr;
+    munright=rp.n.mu;
 
     sy[2]=pleft-pright;
     sy[3]=munleft-munright;
@@ -1653,25 +1457,24 @@ public:
   }
 
   int pdripfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    relaxp *rp;//=(relaxp *)pa;
     double pleft, pright, mupleft, mupright;
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
 
-    rp->n.n=sx[1];
-    rp->p.n=sx[2];
-    sy[1]=rp->p.n-rp->protfrac*(rp->p.n+rp->n.n);
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
+    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
-    pleft=rp->hb.pr;
-    mupleft=rp->p.mu;
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pleft=rp.hb.pr;
+    mupleft=rp.p.mu;
 
-    rp->n.n=0.0;
-    rp->p.n=sx[3];
+    rp.n.n=0.0;
+    rp.p.n=sx[3];
   
-    rp->eos->calc_e(rp->n,rp->p,rp->hb);
-    pright=rp->hb.pr;
-    mupright=rp->p.mu;
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pright=rp.hb.pr;
+    mupright=rp.p.mu;
 
     sy[2]=pleft-pright;
     sy[3]=mupleft-mupright;
@@ -1688,11 +1491,10 @@ seminf_nr_relax::seminf_nr_relax(int tne, int tnb, int tngrid) :
 }
 
 // Code to be executed every iteration
-int seminf_nr_relax::iter(int k, double err, double fac, int *kmax,
+int seminf_nr_relax::iter(int k, double err, double fac, ubvector_int &kmax,
 			  ubvector &ermax) {
   
   ofstream itout;
-  relaxp *rp;//=(relaxp *)pa;
   char s1[80];
 
   int i,j;
@@ -1702,7 +1504,7 @@ int seminf_nr_relax::iter(int k, double err, double fac, int *kmax,
   
   if (true || relaxfile) {
     string soutt=dirname+"/rel"+itos(k)+".out"+
-      itos(rp->iii);
+      itos(rp->pf_index);
     itout.open(soutt.c_str());
     itout.setf(ios::scientific);
     for(i=1;i<=ngrid;i++) {
@@ -1723,7 +1525,7 @@ int seminf_nr_relax::iter(int k, double err, double fac, int *kmax,
     if (k>=1 && k<=itmax) {
       cout << "\t" << k << "  \t" << err << "  \t" << y(3,1) << " ";
       ubmatrix_row amc(y,1);
-      cout << lookup(ngrid,y(1,1)/2.0,x,amc) << " " 
+      cout << snp->lookup(ngrid,y(1,1)/2.0,x,amc) << " " 
 	   << x[ngrid] << endl;
     }
   }
@@ -1778,7 +1580,6 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
   double dx, exx;
   ubvector exy(8), exdy(8);
   ubvector sx(4);
-  relaxp *rp;//=(relaxp *)pa;
   double delta, epsi, tmp;
 
   //--------------------------------------------
@@ -1878,7 +1679,7 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
       for(i=1;i<=5;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
       exx=(x[k]+x[k-1])/2.0*exy[5];
       
-      derivs(exx,exy,exdy);
+      snp->derivs(exx,exy,exdy);
       exdy[5]=0.0;
       for(i=1;i<=5;i++) s(i,jsf)=y(i,k)-y(i,k-1)-
 			  dx*exy[5]*exdy[i];
@@ -1914,7 +1715,7 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
       exy[4]=0.0;
       exy[5]=(y(3,k)+y(3,k-1))/2.0;
       exx=(x[k]+x[k-1])/2.0*exy[5];
-      derivs(exx,exy,exdy);
+      snp->derivs(exx,exy,exdy);
 
       // 10/6/04
       // I think this statement was missing in previous versions

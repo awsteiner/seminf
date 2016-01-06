@@ -53,28 +53,39 @@ class relax {
   /// function grid
   ubmatrix y;
 
+  /// Desc
   ubmatrix s;
-
+  
+  /// Desc
   std::vector<ubmatrix> c;
 
   /// Create an object with ne='tne', nb='tnb', ngrid='tngrid'.
   relax(int tne, int tnb, int tngrid);
 
-  /// Change uniform (possible non-uniform) grid of size ngrid to a 
-  /// uniform grid of size newgrid (sets ngrid=newgrid afterwards). 
-  /// Uses simple linear interpolation.
-  void regrid(int newne, int newnb, int newgrid);
-    
-  /// Expand left use linear extrapolation to increase
-  /// the grid on the LHS or the RHS. Maybe should consider adding 
-  /// versions which simply put the boundary y-values in for all of the
-  /// new y-values.
-  //    void expandleft(int newpts);
+  /** \brief Interpolate into a new grid
 
-  /// Expand right use linear extrapolation to increase
-  /// the grid on the LHS or the RHS. Maybe should consider adding 
-  /// versions which simply put the boundary y-values in for all of the
-  /// new y-values.
+      Change uniform (possible non-uniform) grid of size ngrid to a 
+      uniform grid of size new_grid (sets ngrid=new_grid afterwards). 
+      Uses simple linear interpolation.
+  */
+  void regrid(int new_ne, int new_nb, int new_grid);
+    
+  /** \brief Expand left-hand side
+
+      Expand left use linear extrapolation to increase
+      the grid on the LHS or the RHS. Maybe should consider adding 
+      versions which simply put the boundary y-values in for all of the
+      new y-values.
+  */
+  // void expandleft(int newpts);
+
+  /** \brief Expand right-hand side
+  
+      Expand right use linear extrapolation to increase
+      the grid on the LHS or the RHS. Maybe should consider adding 
+      versions which simply put the boundary y-values in for all of the
+      new y-values.
+  */
   //    void expandright(int newpts);
   
   /// Calculate derivatives
@@ -83,11 +94,6 @@ class relax {
   /// Solve
   int solve(double conv, double slowc);
 
-  /*
-    solve(inte ne, void *pa, int (*difeq)(int, int, int, void *));
-    int set_iter(int (*iter)(int, double, double, int *, double *, void *));
-  */
-  
   /// Provide differential equations
   virtual int difeq(int k, int k1, int k2, int jsf, int is1, int isf)=0;
   
@@ -95,11 +101,14 @@ class relax {
   virtual int iter(int k, double err, double fac, ubvector_int &kmax,
 		   ubvector &ermax);
 
+  /// Desc
   void bksub(int jf, int k1, int k2);
 
+  /// Desc
   void red(int iz1, int iz2, int jz1, int jz2, int jm1, int jm2, 
 	   int jmf, int ic1, int jc1, int jcf, int kc);
 
+  /// Desc
   int pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k);
   
 };

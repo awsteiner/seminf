@@ -2,41 +2,41 @@
 
 using namespace std;
 
-void relax::regrid(int newne, int newnb, int newgrid) {
+void relax::regrid(int new_ne, int new_nb, int new_grid) {
   int lo, hi, i, j;
   ubvector x2;
   ubmatrix y2;
 
   // Make the new space
-  x2.resize(newgrid+1);
-  y2.resize(newne+1,newgrid+1);
+  x2.resize(new_grid+1);
+  y2.resize(new_ne+1,new_grid+1);
 
   // Set up boundaries properly
   x2[1]=x[1];
-  x2[newgrid]=x[ngrid];
-  for(j=1;j<=newne;j++) {
+  x2[new_grid]=x[ngrid];
+  for(j=1;j<=new_ne;j++) {
     if (j<=ne) {
       y2(j,1)=y(j,1);
-      y2(j,newgrid)=y(j,ngrid);
+      y2(j,new_grid)=y(j,ngrid);
     } else {
       y2(j,1)=0.0;
-      y2(j,newgrid)=0.0;
+      y2(j,new_grid)=0.0;
     }
   }
 
   // Fill in the remaining
-  for(i=2;i<=newgrid-1;i++) {
-    x2[i]=x2[1]+((double)(i-1))/((double)(newgrid-1))*
-      (x2[newgrid]-x2[1]);
+  for(i=2;i<=new_grid-1;i++) {
+    x2[i]=x2[1]+((double)(i-1))/((double)(new_grid-1))*
+      (x2[new_grid]-x2[1]);
   }
   lo=1;
   hi=2;
-  for(i=2;i<=newgrid-1;i++) {
+  for(i=2;i<=new_grid-1;i++) {
     while(x2[i]>x[hi]) {
       lo++;
       hi++;
     }
-    for(j=1;j<=newne;j++) {
+    for(j=1;j<=new_ne;j++) {
       if (j<=ne) {
 	y2(j,i)=y(j,lo)+(x2[i]-x[lo])*(y(j,hi)-y(j,lo))/
 	  (x[hi]-x[lo]);
@@ -48,9 +48,9 @@ void relax::regrid(int newne, int newnb, int newgrid) {
   
   x=x2;
   y=y2;
-  ngrid=newgrid;
-  ne=newne;
-  nb=newnb;
+  ngrid=new_grid;
+  ne=new_ne;
+  nb=new_nb;
 
   // Make space for a new s and c:
   s.resize(ne+1,2*ne+2);
@@ -201,7 +201,7 @@ int relax::solve(double conv, double slowc) {
 
 int relax::calcderiv(int k, int k1, int k2, int jsf, int is1, int isf) {
   double f,f2,h,tempd;
-  int i,j, ret;
+  int i,j,ret;
   
   if (k==k1) { 
     for(j=ne-nb+1;j<=ne;j++) {
@@ -413,7 +413,7 @@ int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
 }
 
 int relax::iter(int k, double err, double fac, ubvector_int &kmax,
-		   ubvector &ermax) {
+		ubvector &ermax) {
   
   if (k==1) {
     cout << "\tIter.\tError\t\tFac." << endl;
