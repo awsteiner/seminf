@@ -48,23 +48,17 @@ class relax {
   ubvector scalv;
 
   /// coordinate grid
-  ubvector *x;
+  ubvector x;
 
   /// function grid
-  ubmatrix *y;
+  ubmatrix y;
 
-#ifndef DOXYGENP
+  ubmatrix s;
 
-  ubmatrix *s;
-
-  ubmatrix **c;
-
-#endif
+  std::vector<ubmatrix> c;
 
   /// Create an object with ne='tne', nb='tnb', ngrid='tngrid'.
   relax(int tne, int tnb, int tngrid);
-
-  virtual ~relax();
 
   /// Change uniform (possible non-uniform) grid of size ngrid to a 
   /// uniform grid of size newgrid (sets ngrid=newgrid afterwards). 

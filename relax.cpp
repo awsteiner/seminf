@@ -4,56 +4,48 @@ using namespace std;
 
 void relax::regrid(int newne, int newnb, int newgrid) {
   int lo, hi, i, j;
-  ubvector *x2;
-  ubmatrix *y2;
+  ubvector x2;
+  ubmatrix y2;
 
   // Make the new space
-  x2=new ubvector(newgrid+1);
-  y2=new ubmatrix(newne+1,newgrid+1);
+  x2.resize(newgrid+1);
+  y2.resize(newne+1,newgrid+1);
 
   // Set up boundaries properly
-  (*x2)[1]=(*x)[1];
-  (*x2)[newgrid]=(*x)[ngrid];
+  x2[1]=x[1];
+  x2[newgrid]=x[ngrid];
   for(j=1;j<=newne;j++) {
     if (j<=ne) {
-      (*y2)(j,1)=(*y)(j,1);
-      (*y2)(j,newgrid)=(*y)(j,ngrid);
+      y2(j,1)=y(j,1);
+      y2(j,newgrid)=y(j,ngrid);
     } else {
-      (*y2)(j,1)=0.0;
-      (*y2)(j,newgrid)=0.0;
+      y2(j,1)=0.0;
+      y2(j,newgrid)=0.0;
     }
   }
 
   // Fill in the remaining
   for(i=2;i<=newgrid-1;i++) {
-    (*x2)[i]=(*x2)[1]+((double)(i-1))/((double)(newgrid-1))*
-      ((*x2)[newgrid]-(*x2)[1]);
+    x2[i]=x2[1]+((double)(i-1))/((double)(newgrid-1))*
+      (x2[newgrid]-x2[1]);
   }
   lo=1;
   hi=2;
   for(i=2;i<=newgrid-1;i++) {
-    while((*x2)[i]>(*x)[hi]) {
+    while(x2[i]>x[hi]) {
       lo++;
       hi++;
     }
     for(j=1;j<=newne;j++) {
       if (j<=ne) {
-	(*y2)(j,i)=(*y)(j,lo)+((*x2)[i]-(*x)[lo])*((*y)(j,hi)-(*y)(j,lo))/
-	  ((*x)[hi]-(*x)[lo]);
+	y2(j,i)=y(j,lo)+(x2[i]-x[lo])*(y(j,hi)-y(j,lo))/
+	  (x[hi]-x[lo]);
       } else {
-	(*y2)(j,i)=0.0;
+	y2(j,i)=0.0;
       }
     }
   }
   
-  // Free up the old space
-  for(int ic=0;ic<ne+1;ic++) {
-    delete c[ic];
-  }
-  delete[] c;
-  delete s;
-  delete y;
-  delete x;
   x=x2;
   y=y2;
   ngrid=newgrid;
@@ -61,9 +53,10 @@ void relax::regrid(int newne, int newnb, int newgrid) {
   nb=newnb;
 
   // Make space for a new s and c:
-  s=new ubmatrix(ne+1,2*ne+2);
-  c=new ubmatrix *[ne+1];
-  for(int ic=0;ic<ne+1;ic++) c[ic]=new ubmatrix(ne-nb+2,ngrid+2);
+  s.resize(ne+1,2*ne+2);
+  c.resize(ne+1);
+  for(int ic=0;ic<ne+1;ic++) c[ic].resize(ne-nb+2,ngrid+2);
+  
   return;
 }
 
@@ -79,21 +72,11 @@ relax::relax(int tne, int tnb, int tngrid) {
     indexv[i]=i;
     scalv[i]=1.0;
   }
-  x=new ubvector(ngrid+1);
-  y=new ubmatrix(ne+1,ngrid+1);
-  s=new ubmatrix(ne+1,2*ne+2);
-  c=new ubmatrix *[ne+1];
-  for(int ic=0;ic<ne+1;ic++) c[ic]=new ubmatrix(ne-nb+2,ngrid+2);
-}
-
-relax::~relax() {
-  for(int ic=0;ic<ne+1;ic++) {
-    delete c[ic];
-  }
-  delete[] c;
-  delete s;
-  delete y;
-  delete x;
+  x.resize(ngrid+1);
+  y.resize(ne+1,ngrid+1);
+  s.resize(ne+1,2*ne+2);
+  c.resize(ne+1);
+  for(int ic=0;ic<ne+1;ic++) c[ic].resize(ne-nb+2,ngrid+2);
 }
 
 int relax::solve(double conv, double slowc) {
@@ -181,7 +164,7 @@ int relax::solve(double conv, double slowc) {
       errj=vmax=0.0;
       km=0;
       for (k=k1;k<=k2;k++) {
-	vz=fabs((*(c[jv]))(1,k));
+	vz=fabs(c[jv](1,k));
 	if (vz > vmax) {
 	  vmax=vz;
 	  km=k;
@@ -189,7 +172,7 @@ int relax::solve(double conv, double slowc) {
 	errj += vz;
       }
       err += errj/scalv[j];
-      ermax[j]=(*(c[jv]))(1,km)/scalv[j];
+      ermax[j]=c[jv](1,km)/scalv[j];
       kmax[j]=km;
     }
     err /= nvars;
@@ -198,7 +181,7 @@ int relax::solve(double conv, double slowc) {
     for (j=1;j<=ne;j++) {
       jv=indexv[j];
       for (k=k1;k<=k2;k++) {
-	(*y)(j,k) -= fac*((*(c[jv]))(1,k));
+	y(j,k) -= fac*(c[jv](1,k));
       }
     }
 
@@ -223,24 +206,24 @@ int relax::calcderiv(int k, int k1, int k2, int jsf, int is1, int isf) {
   if (k==k1) { 
     for(j=ne-nb+1;j<=ne;j++) {
       
-      // go back to the old variables and calculate (*s)[i][jsf]
+      // go back to the old variables and calculate s[i][jsf]
       // for each run
       ret=difeq(k,k1,k2,jsf,is1,isf);
       if (ret!=0) return ret;
-      f2=(*s)(j,jsf);
+      f2=s(j,jsf);
 
       for(i=1;i<=ne;i++) {
-	tempd=(*y)(i,k);
+	tempd=y(i,k);
 	h=eps*fabs(tempd);
 	if (fabs(h)<1.e-15) h=eps;
-	(*y)(i,k)=tempd+h;
-	h=(*y)(i,k)-tempd;
+	y(i,k)=tempd+h;
+	h=y(i,k)-tempd;
 	ret=difeq(k,k1,k2,jsf,is1,isf);
 	if (ret!=0) return ret;
-	f=(*s)(j,jsf);
-	(*y)(i,k)=tempd;
+	f=s(j,jsf);
+	y(i,k)=tempd;
 
-	(*s)(j,ne+indexv[i])=(f-f2)/h;
+	s(j,ne+indexv[i])=(f-f2)/h;
 	
       }
     }
@@ -248,58 +231,58 @@ int relax::calcderiv(int k, int k1, int k2, int jsf, int is1, int isf) {
   } else if (k>k2) {
     for(j=1;j<=ne-nb;j++) {
       
-      // go back to the old variables and calculate (*s)[i][jsf]
+      // go back to the old variables and calculate s[i][jsf]
       // for each run
       ret=difeq(k,k1,k2,jsf,is1,isf);
       if (ret!=0) return ret;
-      f2=(*s)(j,jsf);
+      f2=s(j,jsf);
       
       for(i=1;i<=ne;i++) {
-	tempd=(*y)(i,ngrid);
+	tempd=y(i,ngrid);
 	h=eps*fabs(tempd);
 	if (fabs(h)<1.e-15) h=eps;
-	(*y)(i,ngrid)=tempd+h;
-	h=(*y)(i,ngrid)-tempd;
+	y(i,ngrid)=tempd+h;
+	h=y(i,ngrid)-tempd;
 	ret=difeq(k,k1,k2,jsf,is1,isf);
 	if (ret!=0) return ret;
-	f=(*s)(j,jsf);
-	(*y)(i,ngrid)=tempd;
+	f=s(j,jsf);
+	y(i,ngrid)=tempd;
 
-	(*s)(j,ne+indexv[i])=(f-f2)/h;
+	s(j,ne+indexv[i])=(f-f2)/h;
       }
     }
   } else {
     for(j=1;j<=ne;j++) {
       
-      // go back to the old variables and calculate (*s)[i][jsf]
+      // go back to the old variables and calculate s[i][jsf]
       // for each run
       
       ret=difeq(k,k1,k2,jsf,is1,isf);
       if (ret!=0) return ret;
-      f2=(*s)(j,jsf);
+      f2=s(j,jsf);
       
       for(i=1;i<=ne;i++) {
-	tempd=(*y)(i,k-1);
+	tempd=y(i,k-1);
 	h=eps*fabs(tempd);
 	if (fabs(h)<1.e-15) h=eps;
-	(*y)(i,k-1)=tempd+h;
-	h=(*y)(i,k-1)-tempd;
+	y(i,k-1)=tempd+h;
+	h=y(i,k-1)-tempd;
 	ret=difeq(k,k1,k2,jsf,is1,isf);
 	if (ret!=0) return ret;
-	f=(*s)(j,jsf);
-	(*y)(i,k-1)=tempd;
-	(*s)(j,indexv[i])=(f-f2)/h;
+	f=s(j,jsf);
+	y(i,k-1)=tempd;
+	s(j,indexv[i])=(f-f2)/h;
       
-	tempd=(*y)(i,k);
+	tempd=y(i,k);
 	h=eps*fabs(tempd);
 	if (fabs(h)<1.e-15) h=eps;
-	(*y)(i,k)=tempd+h;
-	h=(*y)(i,k)-tempd;
+	y(i,k)=tempd+h;
+	h=y(i,k)-tempd;
 	ret=difeq(k,k1,k2,jsf,is1,isf);
 	if (ret!=0) return ret;
-	f=(*s)(j,jsf);
-	(*y)(i,k)=tempd;
-	(*s)(j,ne+indexv[i])=(f-f2)/h;
+	f=s(j,jsf);
+	y(i,k)=tempd;
+	s(j,ne+indexv[i])=(f-f2)/h;
       }
     }
   }
@@ -317,19 +300,22 @@ void relax::bksub(int jf, int k1, int k2) {
     if (k == k1) im=nbf+1;
     kp=k+1;
     for (j=1;j<=nbf;j++) {
-      xx=(*(c[j]))(jf,kp);
+      xx=c[j](jf,kp);
       for (i=im;i<=ne;i++) {
-	(*(c[i]))(jf,k) -= (*(c[i]))(j,k)*xx;
+	c[i](jf,k)-=c[i](j,k)*xx;
       }
     }
   }
   for (k=k1;k<=k2;k++) {
     kp=k+1;
     for (i=1;i<=nb;i++) {
-      (*(c[i]))(1,k)=(*(c[i+nbf]))(jf,k);
+      c[i](1,k)=c[i+nbf](jf,k);
     }
-    for (i=1;i<=nbf;i++) (*(c[i+nb]))(1,k)=(*(c[i]))(jf,kp);
+    for (i=1;i<=nbf;i++) {
+      c[i+nb](1,k)=c[i](jf,kp);
+    }
   }
+  return;
 }
 
 void relax::red(int iz1, int iz2, int jz1, int jz2, int jm1, int jm2, 
@@ -341,14 +327,15 @@ void relax::red(int iz1, int iz2, int jz1, int jz2, int jm1, int jm2,
   ic=ic1;
   for (j=jz1;j<=jz2;j++) {
     for (l=jm1;l<=jm2;l++) {
-      vx=(*(c[ic]))(l+loff,kc);
-      for (i=iz1;i<=iz2;i++) (*s)(i,l) -= (*s)(i,j)*vx;
+      vx=c[ic](l+loff,kc);
+      for (i=iz1;i<=iz2;i++) s(i,l) -= s(i,j)*vx;
     }
-    vx=(*(c[ic]))(jcf,kc);
-    for (i=iz1;i<=iz2;i++) (*s)(i,jmf) -= (*s)(i,j)*vx;
+    vx=c[ic](jcf,kc);
+    for (i=iz1;i<=iz2;i++) s(i,jmf) -= s(i,j)*vx;
     ic += 1;
   }
 
+  return;
 }
 
 int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
@@ -362,7 +349,7 @@ int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
   for (i=ie1;i<=ie2;i++) {
     big=0.0;
     for (j=je1;j<=je2;j++)
-      if (fabs((*s)(i,j)) > big) big=fabs((*s)(i,j));
+      if (fabs(s(i,j)) > big) big=fabs(s(i,j));
     if (big == 0.0) {
       O2SCL_ERR("Singular matrix in pinvs().",1);
       return 1;
@@ -376,9 +363,9 @@ int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
       if (indxr[i] == 0) {
 	big=0.0;
 	for (j=je1;j<=je2;j++) {
-	  if (fabs((*s)(i,j)) > big) {
+	  if (fabs(s(i,j)) > big) {
 	    jp=j;
-	    big=fabs((*s)(i,j));
+	    big=fabs(s(i,j));
 	  }
 	}
 	if (big*pscl[i] > piv) {
@@ -388,22 +375,22 @@ int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
 	}
       }
     }
-    if ((*s)(ipiv,jpiv) == 0.0) {
+    if (s(ipiv,jpiv) == 0.0) {
       O2SCL_ERR("Singular matrix in pinvs() (2).",2);
       return 2;
     }
     indxr[ipiv]=jpiv;
-    pivinv=1.0/(*s)(ipiv,jpiv);
-    for (j=je1;j<=jsf;j++) (*s)(ipiv,j) *= pivinv;
-    (*s)(ipiv,jpiv)=1.0;
+    pivinv=1.0/s(ipiv,jpiv);
+    for (j=je1;j<=jsf;j++) s(ipiv,j) *= pivinv;
+    s(ipiv,jpiv)=1.0;
     for (i=ie1;i<=ie2;i++) {
       if (indxr[i] != jpiv) {
-	if ((*s)(i,jpiv)) {
-	  dum=(*s)(i,jpiv);
+	if (s(i,jpiv)) {
+	  dum=s(i,jpiv);
 	  for (j=je1;j<=jsf;j++) {
-	    (*s)(i,j) -= dum*(*s)(ipiv,j);
+	    s(i,j) -= dum*s(ipiv,j);
 	  }
-	  (*s)(i,jpiv)=0.0;
+	  s(i,jpiv)=0.0;
 	}
       }
     }
@@ -416,10 +403,12 @@ int relax::pinvs(int ie1, int ie2, int je1, int jsf, int jc1, int k) {
       O2SCL_ERR("irow<0 in pinvs().",3);
       return 3;
     } else {
-      for (j=js1;j<=jsf;j++) (*(c[irow]))(j+jcoff,k)=(*s)(i,j);
+      for (j=js1;j<=jsf;j++) {
+	c[irow](j+jcoff,k)=s(i,j);
+      }
     }
   }
-
+  
   return 0;
 }
 
