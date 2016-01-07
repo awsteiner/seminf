@@ -13,6 +13,12 @@ nr.o: nr.cpp
 nr: nr.o relax.o
 	$(CXX) $(FLAGS) -o nr nr.o relax.o $(LIBS)
 
+rel.o: rel.cpp
+	$(CXX) $(FLAGS) -c rel.cpp
+
+rel: rel.o relax.o
+	$(CXX) $(FLAGS) -o rel rel.o relax.o $(LIBS)
+
 clean:
 	rm nr *.o
 
