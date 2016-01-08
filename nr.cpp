@@ -23,15 +23,10 @@
    \warning This code is very preliminary, and needs quite a bit of
    work.
    
-   Does not work with dripped protons yet.
+   \warning Does not work with dripped protons yet.
    
-   Only zero temperature for now (but some code for finite 
-   temperature has been added).
-   
-   Need to double check diff eq's for APR.
-   
-   \note The first proton fraction cannot be 0.5, since then 'smn'
-   gets confused on further values different from 0.5
+   \note The first proton fraction cannot be 0.5, as the 
+   algorithm cannot handle later values different from 0.5
    
    12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
    nndrip becomes > 0. It seems that in this case, it is better not to
@@ -63,6 +58,7 @@
 #include <o2scl/hdf_io.h>
 #include <o2scl/hdf_eos_io.h>
 #include <o2scl/lib_settings.h>
+#include <o2scl/ode_it_solve.h>
 
 #include "relax.h"
 
@@ -260,9 +256,9 @@ public:
     int verbose=1;
     
     // Not used ATM but probably useful later
-    ubvector rho, alpha, ebulk, egrad, esurf, thickint;
-    ubvector wdint, wd2int;
-    ubvector vqnn, vqnp, vqpp;
+    //ubvector rho, alpha, ebulk, egrad, esurf, thickint;
+    //ubvector wdint, wd2int;
+    //ubvector vqnn, vqnp, vqpp;
     
     nd.tol_abs=1.0e-11;
     nd.tol_rel=1.0e-8;
@@ -1121,6 +1117,39 @@ public:
     }
 
     //----------------------------------------------
+    // Try ode_it_solve
+
+    if (true) {
+      ubvector ox(ngrid);
+      ubmatrix oy(ngrid,rel->ne);
+      for(int i=1;i<=ngrid;i++) {
+	ox[i-1]=rel->x[i];
+	for(int j=1;j<=rel->ne;j++) {
+	  oy(i-1,j-1)=rel->y(j,i);
+	}
+      }
+      ode_it_funct11 f_derivs=std::bind
+	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	 (&seminf_nr::derivs2),this,std::placeholders::_1,std::placeholders::_2,
+	 std::placeholders::_3);       
+      ode_it_funct11 f_left=std::bind
+	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	 (&seminf_nr::left2),this,std::placeholders::_1,std::placeholders::_2,
+	 std::placeholders::_3);       
+      ode_it_funct11 f_right=std::bind
+	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	 (&seminf_nr::right2),this,std::placeholders::_1,std::placeholders::_2,
+	 std::placeholders::_3);   
+      ode_it_solve<> oit;
+      ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
+      ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
+      oit.verbose=2;
+      oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
+		A,rhs,dy);
+      exit(-1);
+    }
+
+    //----------------------------------------------
     // Solve
 
     rhsmode=false;
@@ -1591,32 +1620,37 @@ public:
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
   double derivs2(size_t ieq, double x, ubmatrix_row &y) {
-    ubvector y2=y, dydx(6);
+    ubvector y2=y, dydx(5);
+    vector_out(cout,y2);
     derivs(x,y2,dydx);
-    return dydx[ieq];
+    vector_out(cout,dydx);
+    exit(-1);
+    return dydx[ieq]*y2[4];
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
   double left2(size_t ieq, double x, ubmatrix_row &y) {
-
-    ubvector y2=y, dydx(6);
-    derivs(x,y2,dydx);
     
     double delta=rp.nn0*monfact/exp(big*expo);
     double epsi=delta*(-rp.dmundn+rp.qnn*expo*expo)/
       (rp.dmundp-rp.qnp*expo*expo);
-    
-    if (ieq==0) return y[1]-(rp.nn0-delta*exp(big*expo));
-    else if (ieq==1) return y[2]-(rp.np0-epsi*exp(big*expo));
-    else if (ieq==2) return y[3]+delta*expo*exp(big*expo);
-    return y[4]+epsi*expo*exp(big*expo);
+
+    if (epsi*delta<0.0) {
+      cout << "epsi and delta have different signs" << endl;
+      exit(-1);
+    }
+
+    if (ieq==0) return y[0]-(rp.nn0-delta*exp(big*expo));
+    else if (ieq==1) return y[1]-(rp.np0-epsi*exp(big*expo));
+    else if (ieq==2) return y[2]+delta*expo*exp(big*expo);
+    return y[3]+epsi*expo*exp(big*expo);
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
   double right2(size_t ieq, double x, ubmatrix_row &y) {
-    return y[2];
+    return y[1];
   }
   
 };
@@ -1868,7 +1902,7 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
       s(3,jsf)=y(3,k)-y(3,k-1)-dx*exy[5]*exdy[5];
     }
   }
-  
+
   return 0;
 }
 
