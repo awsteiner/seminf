@@ -50,6 +50,7 @@
 
 using namespace std;
 using namespace o2scl;
+using namespace o2scl_hdf;
 using namespace o2scl_const;
 
 typedef boost::numeric::ublas::vector<double> ubvector;
@@ -131,15 +132,13 @@ public:
 
   int run(int argv, char *argc[]) {
 
-    cout.setf(ios::scientific);
-
     bool flattendone;
-    bool summaryout;
-    bool iterfile;
+    bool summaryout=true;
+    bool iterfile=false;
     bool altsym;
-    bool outputiter;
+    bool outputiter=true;
     bool debug=true;
-    double conve;
+    double conve=1.0e-10;
     double slowc;
     double jlint;
     double senuc;
@@ -149,28 +148,30 @@ public:
     double lam4;
     double xn[4];
     double xp[4];
-    double fact;
+    double fact=1.04;
     double gs;
     double gw;
     double gr;
     double mstar;
     double kfn;
     double kfp;
-    double finalconverge;
+    double finalconverge=1.0e-12;
     double xcent;
-    double derivlimit;
+    double derivlimit=0.04;
     ubvector px(7);
     double wd=0.0;
     double wd2=0.0;
     double w0=0.0;
     ifstream fin; 
-    int flattenit;
+    int flattenit=70;
     int sz;
     int sz2;
     static const int ne=6, nb=3;
-    int lastit, npoints=64;
+    int lastit;
+    int npoints=64;
     ofstream fout;
-    double xstor[ngrid+1], ystor[ne+1][ngrid+1];
+    double xstor[ngrid+1];
+    double ystor[ne+1][ngrid+1];
     string dirname;
 
     double sssv1=0.0;
@@ -191,21 +192,18 @@ public:
     double nn2;
     double np2;
     double hbarn;
-    double *ebulklam;
     double nn0;
     double np0;
     double sbulk;
     double sgrad;
-    double *rhoprime;
     double surf2;
     double f1;
     double f2;
     double f3;
     double thick=0.0;
     double n0half;
-    double sprotfrac;
+    double sprotfrac=0.49;
     double delta;
-    double *qpq;
     bool guessdone=false;
     double dx=0.01;
     double fn;
@@ -216,7 +214,6 @@ public:
     int interp;
     bool usehc;
     string hcmodel;
-    table<> at(1000);
 
     //--------------------------------------------
     // Equation of state initializations
@@ -227,6 +224,7 @@ public:
     nd.ntrial=100;
 
     eos_had_rmf rmf_eos;
+    rmf_load(rmf_eos,"RAPR");
     rp.n.init(o2scl_settings.get_convert_units().convert
 	      ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
     rp.p.init(o2scl_settings.get_convert_units().convert
@@ -235,20 +233,23 @@ public:
     rp.p.non_interacting=false;
     rp.debug=debug;
     rp.showdiff=false;
-
+    rp.showrelax=true;
+    rp.maxdev=1.0e2;
+    
     //--------------------------------------------
     // Initializations for relaxation class
 
-    s3relax *rel;
+    s3relax *rel=new s3relax(ne,nb,ngrid);
+    rel->rp=&rp;
+    rel->itmax=100;
 
-    rel=new s3relax(ne,nb,ngrid);
-  
+    table<> at(1000);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
   
     slowc=1.0;
   
     double r0=cbrt(0.75/pi/n0half);
-
+    
     for(int pf_index=1;pf_index<=2;pf_index++) {
 
       if (pf_index==1) {
@@ -266,11 +267,11 @@ public:
       rmf_eos.set_n_and_p(rp.n,rp.p);
       rmf_eos.set_thermo(rp.tht);
     
-      rp.nsat=rmf_eos.fn0(protfrac,eoatemp);
+      rp.nsat=rmf_eos.fn0(1.0-2.0*protfrac,eoatemp);
       rmf_eos.get_fields(rp.phi0,rp.v0,rp.r0);
     
       cout << "Saturation density at x=" << protfrac << ": " << rp.nsat << endl;
-
+      
       rp.mun=rp.n.mu;
       rp.mup=rp.p.mu;
       nn0=rp.n.n;
@@ -310,8 +311,9 @@ public:
   
       //----------------------------------------------
       // Construct guess
-
-      if (argv<3) {
+      
+      if (true) {
+	
 	rel->x[1]=0.0;
 	rel->y(1,1)=rp.phi0;
 	rel->y(2,1)=rp.v0;
@@ -374,7 +376,7 @@ public:
 	  }
 	}
       }
-    
+
       //----------------------------------------------
       // Now we center the x-axis on zero, which makes it
       // easier to expand the grid later
@@ -382,6 +384,17 @@ public:
       xcent=rel->x[ngrid/2];
       for(int i=1;i<=ngrid;i++) {
 	rel->x[i]-=xcent;
+      }
+
+      if (debug) {
+	for(int i=1;i<=ngrid;i+=ngrid/70) {
+	  cout.width(3);
+	  cout << i << " ";
+	  cout.setf(ios::showpos);
+	  cout << rel->x[i] << " " << rel->y(1,i) << " " << rel->y(2,i)
+	       << " " << rel->y(3,i) << endl;
+	  cout.unsetf(ios::showpos);
+	}
       }
 
       rp.convergeflag=true;
@@ -402,8 +415,10 @@ public:
   
 	//--------------------------------------------
 	// Solve equations
-      
+
+	cout << "Going to solve." << endl;
 	rel->solve(conve,slowc);
+	cout << "Done with solve." << endl;
   
 	if (outputiter) {
 	  cout << j << " " << rel->x[ngrid]-rel->x[1] << " " 
@@ -467,10 +482,14 @@ public:
 
       //--------------------------------------------
       // Output characteristics of final solution
-    
+      
       at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
 		       "egrad thickint wdint wd2int qpq ");
       at.set_nlines(ngrid);
+
+      //double *ebulklam;
+      //double *rhoprime;
+      //double *qpq;
 
       //--------------------------------------------
       // Calculate rhon, rhop, energy, and ebulk at
@@ -517,24 +536,26 @@ public:
       
 	// There doesn't seem to be much difference between this approach
 	// and the one below
-	rhoprime[i]=(kfn*(rp.n.nu*(-gw*rel->y(5,i)+gr/2.0*rel->y(6,i))+
-			  mstar*gs*rel->y(4,i))+
-		     kfp*(rp.p.nu*(-gw*rel->y(5,i)-gr/2.0*rel->y(6,i))+
-			  mstar*gs*rel->y(4,i)))/pi2;
+	at.set("nprime",i,(kfn*(rp.n.nu*(-gw*rel->y(5,i)+gr/2.0*rel->y(6,i))+
+				mstar*gs*rel->y(4,i))+
+			   kfp*(rp.p.nu*(-gw*rel->y(5,i)-gr/2.0*rel->y(6,i))+
+				mstar*gs*rel->y(4,i)))/pi2);
 	//if (i==0) rhoprime[i]=0;
 	//else rhoprime[i]=(rho[i]-rho[i-1])/(rel->x[i]-rel->x[i-1]);
-    
-	if (rhoprime[i]!=0.0) {
+	
+	if (at.get("nprime",i)!=0.0) {
 	  // Here qpq=Q_nn+Q_np is calculated from the bulk energy. One
 	  // Could calculate this from the gradient part of the surface
 	  // energy as well. There is not much difference.
-	  qpq[i]=(rp.hb.ed-rp.mup*at.get("np",i)-
-		  rp.mun*at.get("nn",i))*4.0/rhoprime[i]/rhoprime[i];
+	  at.set("qpq",i,(rp.hb.ed-rp.mup*at.get("np",i)-
+			  rp.mun*at.get("nn",i))*4.0/at.get("nprime",i)/
+		 at.get("nprime",i));
 	  //qpq[i]=(rel->y(4,i)*rel->y(4,i)-
 	  // rel->y(5,i)*rel->y(5,i)-
-	  // rel->y(6,i)*rel->y(6,i))*2.0/rhoprime[i]/rhoprime[i];
+	  // rel->y(6,i)*rel->y(6,i))*2.0/at.get("nprime",i)/
+	  // at.get("nprime",i);
 	} else {
-	  qpq[i]=0.0;
+	  at.set("qpq",i,0.0);
 	}
 
 	at.set("thickint",i,(at.get("nn",i)/nn0-at.get("np",i)/np0));
@@ -571,9 +592,13 @@ public:
 
       const std::vector<double> &xav=at[0];
       size_t istt=at.get_nlines()-1;
-      
+
+      cout << "I1" << istt << " " << at.get_nlines() << endl;
+      cout << "Ia " << xav[0] << endl;
+      cout << "Ib " << xav[istt] << endl;
       surf=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
 		    at.get_column("esurf"));
+      cout << "I2" << endl;
       surf2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
 		    at.get_column("esurf2"));
       sbulk=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
@@ -668,6 +693,8 @@ public:
       
 #endif
       
+      cout << "H2." << endl;
+      
     }
 
     delete rel;
@@ -727,6 +754,9 @@ public:
 
 int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
 		  ubvector &ermax) {
+
+  cout << "Iter." << endl;
+  
   ofstream itout;
 
   if (rp->showrelax) {
@@ -748,7 +778,7 @@ int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
   }
 
   if (err>rp->maxdev) {
-    cout << "Reached maxdev." << endl;
+    cout << "Reached maxdev " << rp->maxdev << endl;
     exit(-1);
     rp->convergeflag=false;
 
@@ -763,6 +793,7 @@ int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
 }
 
 int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
+
   double phi, v, phip, vp, fn, fn2, dx, mstar;
   double fn3, kfn, kfp;
   double gs, gw, gr, hbarn;
@@ -838,8 +869,8 @@ int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
     rp->n.nu=rp->mun-gw*v+0.5*gr*r;
     rp->p.nu=rp->mup-gw*v-0.5*gr*r;
     
-    rp->rmf_eos.calc_eq_p((rp->n),(rp->p),phi,v,r,fn,fn2,fn3,
-			   (rp->hb));
+    rp->rmf_eos.calc_eq_p(rp->n,rp->p,phi,v,r,fn,fn2,fn3,rp->hb);
+
     s(1,jsf)=y(1,k)-y(1,k-1)-dx*phip;
     s(2,jsf)=y(2,k)-y(2,k-1)-dx*vp;
     s(3,jsf)=y(3,k)-y(3,k-1)-dx*rprime;
