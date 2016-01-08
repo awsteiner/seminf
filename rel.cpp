@@ -19,15 +19,11 @@
   -------------------------------------------------------------------
 */
 /*
-  1/03 - Added option of using proton fraction from lead nucleus
-
-  11/03 - Initial guess reading broken
-
-  2/20/04 - wd2int() is broken since fesym() tends to 
+  \note Initial guess reading might be broken
+  
+  \note wd2int() is broken since fesym() tends to 
   fail at low densities. This is ok, however, since wd(drop2) is
   not used in any of the figures.
-
-  5/5/05 - Converted to new o2scl vectors, etc.
 */
 
 #include <cmath>
@@ -63,23 +59,12 @@ typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
 static const int ngrid=700;
 
 //--------------------------------------------
-// Class definition for relaxation routine
-
-class s3relax : public relax {
-public:
-  s3relax(int tne, int tnb, int tngrid);
-  int iter(int k, double err, double fac, ubvector_int &kmax,
-	   ubvector &errmax);
-  int difeq(int k, int k1, int k2, int jsf, int is1, int isf);
-};
-
-s3relax::s3relax(int tne, int tnb, int tngrid) : 
-  relax(tne,tnb,tngrid) {}
-
-//--------------------------------------------
 // Structure for relax parameters
 
-typedef struct relaxp_s {
+class relaxp {
+
+public:
+
   double mun;
   double mup;
   double maxdev;
@@ -94,28 +79,37 @@ typedef struct relaxp_s {
   fermion n;
   fermion p;
   thermo hb;
-} relaxp;
+  double nsat;
+  double protfrac;
+  thermo tht;
+
+};
+
+class s3relax : public relax {
+
+public:
+
+  relaxp *rp;
+
+  s3relax(int tne, int tnb, int tngrid);
+
+  int iter(int k, double err, double fac, ubvector_int &kmax,
+	   ubvector &errmax);
+
+  int difeq(int k, int k1, int k2, int jsf, int is1, int isf);
+  
+};
+
+s3relax::s3relax(int tne, int tnb, int tngrid) : 
+  relax(tne,tnb,tngrid) {}
+
 
 class seminf_rel {
   
 public:
   
-  //--------------------------------------------
-  // Structure for newt parameters
-
-  typedef struct newtp_s {
-    // barn and protfrac are always the baryon number
-    // and the proton fraction at -infinity
-    double nsat;
-    double protfrac;
-    eos_had_rmf rmf_eos;
-    fermion n;
-    fermion p;
-    thermo hb;
-  } newtp;
-
-  thermo tht;
-
+  relaxp rp;
+  
   /** \brief Desc
    */
   template<class vec_t, class vec2_t> 
@@ -145,7 +139,6 @@ public:
     bool altsym;
     bool outputiter;
     bool debug=true;
-    char ch;
     double conve;
     double slowc;
     double jlint;
@@ -232,19 +225,16 @@ public:
     nd.tol_abs=1.0e-15;
     nd.tol_rel=1.0e-12;
     nd.ntrial=100;
-    mroot_hybrids<> nd2;
-    nd2.tol_abs=1.0e-15;
-    nd2.tol_rel=1.0e-12;
-    nd2.ntrial=100;
 
     eos_had_rmf rmf_eos;
-    newtp np;
-    np.n.init(o2scl_settings.get_convert_units().convert
+    rp.n.init(o2scl_settings.get_convert_units().convert
 	      ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
-    np.p.init(o2scl_settings.get_convert_units().convert
+    rp.p.init(o2scl_settings.get_convert_units().convert
 	      ("kg","1/fm",o2scl_mks::mass_proton),2.0);
-    np.n.non_interacting=false;
-    np.p.non_interacting=false;
+    rp.n.non_interacting=false;
+    rp.p.non_interacting=false;
+    rp.debug=debug;
+    rp.showdiff=false;
 
     //--------------------------------------------
     // Initializations for relaxation class
@@ -257,13 +247,6 @@ public:
   
     slowc=1.0;
   
-    relaxp rp;
-    rp.debug=debug;
-    rp.showdiff=false;
-    rp.n=np.n;
-    rp.p=np.p;
-    rp.hb=np.hb;
-
     double r0=cbrt(0.75/pi/n0half);
 
     for(int pf_index=1;pf_index<=2;pf_index++) {
@@ -278,24 +261,24 @@ public:
       // Now calculate for saturation nuclear matter with proton
       // fraction given in parameter file 
   
-      np.protfrac=protfrac;
+      rp.protfrac=protfrac;
       double eoatemp;
-      rmf_eos.set_n_and_p(np.n,np.p);
-      rmf_eos.set_thermo(tht);
+      rmf_eos.set_n_and_p(rp.n,rp.p);
+      rmf_eos.set_thermo(rp.tht);
     
-      np.nsat=rmf_eos.fn0(protfrac,eoatemp);
+      rp.nsat=rmf_eos.fn0(protfrac,eoatemp);
       rmf_eos.get_fields(rp.phi0,rp.v0,rp.r0);
     
-      cout << "Saturation density at x=" << protfrac << ": " << np.nsat << endl;
+      cout << "Saturation density at x=" << protfrac << ": " << rp.nsat << endl;
 
-      rp.mun=np.n.mu;
-      rp.mup=np.p.mu;
-      nn0=np.n.n;
-      np0=np.p.n;
+      rp.mun=rp.n.mu;
+      rp.mup=rp.p.mu;
+      nn0=rp.n.n;
+      np0=rp.p.n;
 
-      if (rp.mun>np.n.m) {
+      if (rp.mun>rp.n.m) {
 
-	np.protfrac=0.3;
+	rp.protfrac=0.3;
 
 	px[0]=0.07;
 	px[1]=0.07;
@@ -493,7 +476,7 @@ public:
       // Calculate rhon, rhop, energy, and ebulk at
       // every point in profile
     
-      hns=rmf_eos.fesym(np.nsat,protfrac);
+      hns=rmf_eos.fesym(rp.nsat,protfrac);
       delta=1.0-2.0*protfrac;
     
       for(int i=1;i<=ngrid;i++) {
@@ -511,15 +494,15 @@ public:
 	at.set("n",i,at.get("nn",i)+at.get("np",i));
 	at.set("alpha",i,at.get("nn",i)-at.get("np",i));
 
-	np.n.ms=mstar;
-	np.p.ms=mstar;
-	np.n.nu=sqrt(kfn*kfn+np.n.ms*np.n.ms);
-	np.p.nu=sqrt(kfp*kfp+np.p.ms*np.p.ms);
-	rmf_eos.calc_eq_p(np.n,np.p,rel->y(1,i),rel->y(2,i),
-			  rel->y(3,i),f1,f2,f3,np.hb);
-	np.hb.ed=-np.hb.pr+np.n.n*np.n.mu+np.p.n*np.p.mu;
+	rp.n.ms=mstar;
+	rp.p.ms=mstar;
+	rp.n.nu=sqrt(kfn*kfn+rp.n.ms*rp.n.ms);
+	rp.p.nu=sqrt(kfp*kfp+rp.p.ms*rp.p.ms);
+	rmf_eos.calc_eq_p(rp.n,rp.p,rel->y(1,i),rel->y(2,i),
+			  rel->y(3,i),f1,f2,f3,rp.hb);
+	rp.hb.ed=-rp.hb.pr+rp.n.n*rp.n.mu+rp.p.n*rp.p.mu;
 
-	at.set("ebulk",i,np.hb.ed-rp.mup*at.get("np",i)-
+	at.set("ebulk",i,rp.hb.ed-rp.mup*at.get("np",i)-
 	       rp.mun*at.get("nn",i));
 	at.set("egrad",i,0.5*(rel->y(4,i)*rel->y(4,i)-
 			      rel->y(5,i)*rel->y(5,i)-
@@ -534,9 +517,9 @@ public:
       
 	// There doesn't seem to be much difference between this approach
 	// and the one below
-	rhoprime[i]=(kfn*(np.n.nu*(-gw*rel->y(5,i)+gr/2.0*rel->y(6,i))+
+	rhoprime[i]=(kfn*(rp.n.nu*(-gw*rel->y(5,i)+gr/2.0*rel->y(6,i))+
 			  mstar*gs*rel->y(4,i))+
-		     kfp*(np.p.nu*(-gw*rel->y(5,i)-gr/2.0*rel->y(6,i))+
+		     kfp*(rp.p.nu*(-gw*rel->y(5,i)-gr/2.0*rel->y(6,i))+
 			  mstar*gs*rel->y(4,i)))/pi2;
 	//if (i==0) rhoprime[i]=0;
 	//else rhoprime[i]=(rho[i]-rho[i-1])/(rel->x[i]-rel->x[i-1]);
@@ -545,8 +528,8 @@ public:
 	  // Here qpq=Q_nn+Q_np is calculated from the bulk energy. One
 	  // Could calculate this from the gradient part of the surface
 	  // energy as well. There is not much difference.
-	  qpq[i]=(np.hb.ed-rp.mup*at.get("np",i)-rp.mun*at.get("nn",i))*4.0/rhoprime[i]/
-	    rhoprime[i];
+	  qpq[i]=(rp.hb.ed-rp.mup*at.get("np",i)-
+		  rp.mun*at.get("nn",i))*4.0/rhoprime[i]/rhoprime[i];
 	  //qpq[i]=(rel->y(4,i)*rel->y(4,i)-
 	  // rel->y(5,i)*rel->y(5,i)-
 	  // rel->y(6,i)*rel->y(6,i))*2.0/rhoprime[i]/rhoprime[i];
@@ -625,7 +608,7 @@ public:
 	wdjl=0.0;
 
 	inte_qag_gsl gl;
-	double xint=0.5*np.nsat, tweight;
+	double xint=0.5*rp.nsat, tweight;
       
 	for(int i=0;i<npoints*2;i++) {
 	  if (i>npoints) {
@@ -640,38 +623,38 @@ public:
 	  ubmatrix_row ar2(*rel->y,2);
 	  ubmatrix_row ar3(*rel->y,3);
 	
-	  np.n.n=lookup(ngrid,nint,rhon,rho);
-	  np.p.n=lookup(ngrid,nint,rhop,rho);
+	  rp.n.n=lookup(ngrid,nint,rhon,rho);
+	  rp.p.n=lookup(ngrid,nint,rhop,rho);
 	  sig=lookup(ngrid,nint,ar1,rho);
 	  ome=lookup(ngrid,nint,ar2,rho);
 	  rhof=lookup(ngrid,nint,ar3,rho);
 	  qq=lookup(ngrid,nint,qpq,rho);
 
-	  np.n.kffromden();
-	  np.p.kffromden();
-	  np.n.ms=np.n.m-gs*sig;
-	  np.p.ms=np.n.ms;
-	  np.n.nu=sqrt(np.n.kf*np.n.kf+np.n.ms*np.n.ms);
-	  np.p.nu=sqrt(np.p.kf*np.p.kf+np.p.ms*np.p.ms);
+	  rp.n.kffromden();
+	  rp.p.kffromden();
+	  rp.n.ms=rp.n.m-gs*sig;
+	  rp.p.ms=rp.n.ms;
+	  rp.n.nu=sqrt(rp.n.kf*rp.n.kf+rp.n.ms*rp.n.ms);
+	  rp.p.nu=sqrt(rp.p.kf*rp.p.kf+rp.p.ms*rp.p.ms);
 	
 	  double estmp;
 	
-	  np.rmf_eos.calc_p(np.n,np.p,sig,ome,rhof,f1,f2,f3,np.hb);
-	  //np.hb.ed=-np.hb.pr+np.n.n*np.n.mu+np.p.n*np.p.mu;
+	  rp.rmf_eos.calc_p(rp.n,rp.p,sig,ome,rhof,f1,f2,f3,rp.hb);
+	  //rp.hb.ed=-rp.hb.pr+rp.n.n*rp.n.mu+rp.p.n*rp.p.mu;
 	
 	  estmp=rmf_eos.fesym(nint);
 	  // fesym() automatically computes the bulk energy density
 	  // and puts the result into tht.ed:
-	  np.hb.ed=tht.ed;
+	  rp.hb.ed=rp.tht.ed;
 
-	  if (np.hb.ed-rp.mun*np.n.n-rp.mup*np.p.n>0.0 && qq>0.0) {
+	  if (rp.hb.ed-rp.mun*rp.n.n-rp.mup*rp.p.n>0.0 && qq>0.0) {
 	    wdjl+=tweight*sqrt(qq)*nint*(hns/estmp-1.0)/
-	      sqrt(np.hb.ed-rp.mun*np.n.n-rp.mup*np.p.n);
-	    w0jl+=tweight*sqrt(fabs(qq*(np.hb.ed-rp.mun*np.n.n-
-					rp.mup*np.p.n)));
+	      sqrt(rp.hb.ed-rp.mun*rp.n.n-rp.mup*rp.p.n);
+	    w0jl+=tweight*sqrt(fabs(qq*(rp.hb.ed-rp.mun*rp.n.n-
+					rp.mup*rp.p.n)));
 	    if (!finite(wdjl)) {
 	      cout << "wdjl not finite." << endl;
-	      cout << np.hb.ed-rp.mun*np.n.n-rp.mup*np.p.n << endl;
+	      cout << rp.hb.ed-rp.mun*rp.n.n-rp.mup*rp.p.n << endl;
 	      cout << hns << " " << qq << endl;
 	      exit(-1);
 	    }
@@ -694,9 +677,7 @@ public:
 
   int nucmat(size_t nv, const ubvector &ex, ubvector &ey) {
     double f1,f2,f3,sig,ome,rho;
-    char ch;
-    newtp *sp;//=(newtp *)pa;
-    fermion &n=sp->n, &p=sp->p;
+    fermion &n=rp.n, &p=rp.p;
 
     n.nu=ex[0];
     p.nu=ex[1];
@@ -704,10 +685,10 @@ public:
     ome=ex[3];
     rho=ex[4];
 
-    sp->rmf_eos.calc_eq_p(n,p,sig,ome,rho,f1,f2,f3,sp->hb);
+    rp.rmf_eos.calc_eq_p(n,p,sig,ome,rho,f1,f2,f3,rp.hb);
 
-    ey[0]=p.n+n.n-sp->nsat;
-    ey[1]=p.n-sp->nsat*sp->protfrac;
+    ey[0]=p.n+n.n-rp.nsat;
+    ey[1]=p.n-rp.nsat*rp.protfrac;
     ey[2]=f1;
     ey[3]=f2;
     ey[4]=f3;
@@ -718,21 +699,20 @@ public:
   int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
     double pleft, pright, munleft, munright;
   
-    newtp *sp;//=(newtp *)pa;
-    fermion &n=sp->n, &p=sp->p;
-    thermo &hb=sp->hb;
+    fermion &n=rp.n, &p=rp.p;
+    thermo &hb=rp.hb;
 
     n.n=sx[0];
     p.n=sx[1];
-    sp->rmf_eos.calc_e(n,p,hb);
+    rp.rmf_eos.calc_e(n,p,hb);
   
-    sy[0]=p.n-sp->protfrac*(p.n+n.n);
+    sy[0]=p.n-rp.protfrac*(p.n+n.n);
     pleft=hb.pr;
     munleft=n.mu;
 
     n.n=sx[2];
     p.n=0.001;
-    sp->rmf_eos.calc_e(n,p,hb);
+    rp.rmf_eos.calc_e(n,p,hb);
 
     pright=hb.pr;
     munright=n.mu;
@@ -748,8 +728,6 @@ public:
 int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
 		  ubvector &ermax) {
   ofstream itout;
-  relaxp *rp;//=(relaxp *)pa;
-  char ch;
 
   if (rp->showrelax) {
     if (k==1) {
@@ -785,15 +763,13 @@ int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
 }
 
 int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
-  double phi, v, phip, vp, fn, fn2, dx, mstar, rp, r;
+  double phi, v, phip, vp, fn, fn2, dx, mstar;
   double fn3, kfn, kfp;
   double gs, gw, gr, hbarn;
-  relaxp *rpa;//=(relaxp *)pa;
-  char ch;
 
-  gs=rpa->rmf_eos.cs*rpa->rmf_eos.ms;
-  gw=rpa->rmf_eos.cw*rpa->rmf_eos.mw;
-  gr=rpa->rmf_eos.cr*rpa->rmf_eos.mr;
+  gs=rp->rmf_eos.cs*rp->rmf_eos.ms;
+  gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
+  gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
   
   // 10/9/03 - Seems like this is repetitive. 
   // s[4][ne+indexv[1]] should be calculated already in calcderiv??
@@ -805,21 +781,21 @@ int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
       s(4,ne+indexv[4])=0.0;
       s(4,ne+indexv[5])=0.0;
       s(4,ne+indexv[6])=0.0;
-      s(4,jsf)=y(1,1)-rpa->phi0;
+      s(4,jsf)=y(1,1)-rp->phi0;
       s(5,ne+indexv[1])=0.0;
       s(5,ne+indexv[2])=1.0;
       s(5,ne+indexv[3])=0.0;
       s(5,ne+indexv[4])=0.0;
       s(5,ne+indexv[5])=0.0;
       s(5,ne+indexv[6])=0.0;
-      s(5,jsf)=y(2,1)-rpa->v0;
+      s(5,jsf)=y(2,1)-rp->v0;
       s(6,ne+indexv[1])=0.0;
       s(6,ne+indexv[2])=0.0;
       s(6,ne+indexv[3])=1.0;
       s(6,ne+indexv[4])=0.0;
       s(6,ne+indexv[5])=0.0;
       s(6,ne+indexv[6])=0.0;
-      s(6,jsf)=y(3,1)-rpa->r0;
+      s(6,jsf)=y(3,1)-rp->r0;
     } else {
       cout << "What?" << endl;
       exit(-1);
@@ -854,19 +830,19 @@ int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
     dx=x[k]-x[k-1];
     phi=(y(1,k)+y(1,k-1))/2.0;
     v=(y(2,k)+y(2,k-1))/2.0;
-    r=(y(3,k)+y(3,k-1))/2.0;
+    double r=(y(3,k)+y(3,k-1))/2.0;
     phip=(y(4,k)+y(4,k-1))/2.0;
     vp=(y(5,k)+y(5,k-1))/2.0;
-    rp=(y(6,k)+y(6,k-1))/2.0;
+    double rprime=(y(6,k)+y(6,k-1))/2.0;
     
-    rpa->n.nu=rpa->mun-gw*v+0.5*gr*r;
-    rpa->p.nu=rpa->mup-gw*v-0.5*gr*r;
+    rp->n.nu=rp->mun-gw*v+0.5*gr*r;
+    rp->p.nu=rp->mup-gw*v-0.5*gr*r;
     
-    rpa->rmf_eos.calc_eq_p((rpa->n),(rpa->p),phi,v,r,fn,fn2,fn3,
-			   (rpa->hb));
+    rp->rmf_eos.calc_eq_p((rp->n),(rp->p),phi,v,r,fn,fn2,fn3,
+			   (rp->hb));
     s(1,jsf)=y(1,k)-y(1,k-1)-dx*phip;
     s(2,jsf)=y(2,k)-y(2,k-1)-dx*vp;
-    s(3,jsf)=y(3,k)-y(3,k-1)-dx*rp;
+    s(3,jsf)=y(3,k)-y(3,k-1)-dx*rprime;
     s(4,jsf)=y(4,k)-y(4,k-1)-dx*fn;
     s(5,jsf)=y(5,k)-y(5,k-1)-dx*fn2;
     s(6,jsf)=y(6,k)-y(6,k-1)-dx*fn3;
