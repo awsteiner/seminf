@@ -245,6 +245,9 @@ public:
 
     table<> at(1000);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
+    at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
+		     "egrad thickint wdint wd2int qpq ");
+    at.set_nlines(ngrid);
   
     slowc=1.0;
   
@@ -482,11 +485,17 @@ public:
 
       //--------------------------------------------
       // Output characteristics of final solution
-      
-      at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
-		       "egrad thickint wdint wd2int qpq ");
-      at.set_nlines(ngrid);
 
+      for(int i=1;i<=ngrid;i++) {
+	at.set("x",i-1,rel->x[i]);
+	at.set("sigma",i-1,rel->y(1,i));
+	at.set("omega",i-1,rel->y(2,i));
+	at.set("rho",i-1,rel->y(3,i));
+	at.set("sigmap",i-1,rel->y(4,i));
+	at.set("omegap",i-1,rel->y(5,i));
+	at.set("rhop",i-1,rel->y(6,i));
+      }
+	
       //double *ebulklam;
       //double *rhoprime;
       //double *qpq;
@@ -498,7 +507,7 @@ public:
       hns=rmf_eos.fesym(rp.nsat,protfrac);
       delta=1.0-2.0*protfrac;
     
-      for(int i=1;i<=ngrid;i++) {
+      for(int i=0;i<ngrid;i++) {
 	mstar=rmf_eos.mnuc-gs*rel->y(1,i);
     
 	if (rp.mun-gw*rel->y(2,i)+gr*rel->y(3,i)/2.0<mstar) kfn=0.0;
@@ -593,28 +602,24 @@ public:
       const std::vector<double> &xav=at[0];
       size_t istt=at.get_nlines()-1;
 
-      cout << "I1" << istt << " " << at.get_nlines() << endl;
-      cout << "Ia " << xav[0] << endl;
-      cout << "Ib " << xav[istt] << endl;
-      surf=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+      surf=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("esurf"));
-      cout << "I2" << endl;
-      surf2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+      surf2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("esurf2"));
-      sbulk=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+      sbulk=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("ebulk"));
-      sgrad=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+      sgrad=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("egrad"));
-      thick=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+      thick=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("thickint"));
 
       if (pf_index>=2) {
 
-	wd=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+	wd=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		       at.get_column("wdint"));
 	wd*=hns;
 
-	wd2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column(0),
+	wd2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		     at.get_column("wd2int"));
 	
 	sssv1=4.0*pi*r0*r0*wd/hns;
@@ -693,7 +698,13 @@ public:
       
 #endif
       
-      cout << "H2." << endl;
+      hdf_file hf;
+      string tablename=((string)"rel")+std::to_string(pf_index);
+      hf.open_or_create("rel.o2");
+      hdf_output(hf,at,tablename);
+      hf.close();
+      cout << "Wrote solution to file 'rel.o2'" << endl;
+      cout << endl;
       
     }
 
