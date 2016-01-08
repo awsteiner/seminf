@@ -22,3 +22,7 @@ rel: rel.o relax.o
 clean:
 	rm nr *.o
 
+doc: empty
+	cd doc; doxygen doxyfile
+
+empty:
