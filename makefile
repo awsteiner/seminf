@@ -23,6 +23,9 @@ clean:
 	rm nr *.o
 
 doc: empty
+	git rev-parse HEAD | awk \
+		'{print "<a href=\"http://github.com/awsteiner/seminf/tree/" $$1 "\">" $$1 "</a>"}' \
+		 > doc/rev.txt
 	cd doc; doxygen doxyfile
 
 empty:
