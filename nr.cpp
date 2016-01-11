@@ -683,7 +683,7 @@ public:
       if (qnn_equals_qnp) {
 	solve_qnn_equal_qnp(monfact);
       } else {
-	solve_qnn_neq_qnp(monfact);
+	solve_qnn_neq_qnp(monfact,argc);
       }
 
       //--------------------------------------------
@@ -899,8 +899,13 @@ public:
 	dqppdnp=0.0;
       }
     }
-  
+
     rp.eos->calc_e(rp.n,rp.p,rp.hb);
+#ifdef DEBUG
+    cout << "A: " << rp.n.n << " " << rp.p.n << " " << rp.qnn << endl;
+    cout << "B: " << rp.n.m << " " << rp.p.m << endl;
+    cout << "C: " << rp.n.mu << " " << rp.p.mu << endl;
+#endif
     /*
       double mun=rp.n.mu, mup=rp.p.mu, msn=rp.n.ms, msp=rp.p.ms;
       double hed=rp.hb->ed, hpr=rp.hb->pr, part;
@@ -955,6 +960,12 @@ public:
 	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
 	  rhsn/=det;
 	  rhsp/=det;
+#ifdef DEBUG
+	  cout << "K: " << rhsn << " " << rhsp << " " << rp.n.mu << " "
+	       << rp.qpp << endl;
+	  cout << "L: " << rp.qnp << " " << rp.qnn << " "
+	       << rp.p.mu << " " << rp.mun << endl;
+	  #endif
 	} else {
 	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
 	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
@@ -1001,7 +1012,147 @@ public:
 
   /** \brief Desc
    */
-  double solve_qnn_neq_qnp(double lmonfact) {
+  int derivs2(double sx, const ubvector &sy, ubvector &dydx) {
+    double rhsn, rhsp=0.0, det;
+    double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
+
+    rp.n.n=sy[0];
+    rp.p.n=sy[1];
+    if (model=="apr") {
+      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
+			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+    }
+    if (model=="gp") {
+      thermo thth;
+      if (false) {
+	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+      } else {
+	rp.qnn=100.0/hc_mev_fm;
+	rp.qpp=100.0/hc_mev_fm;
+	rp.qnp=90.0/hc_mev_fm;
+	dqnndnn=0.0;
+	dqnndnp=0.0;
+	dqnpdnn=0.0;
+	dqnpdnp=0.0;
+	dqppdnn=0.0;
+	dqppdnp=0.0;
+      }
+    }
+
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+#ifdef DEBUG
+    cout << "A2: " << rp.n.n << " " << rp.p.n << " " << rp.qnn << endl;
+    cout << "B2: " << rp.n.m << " " << rp.p.m << endl;
+    cout << "C2: " << rp.n.mu << " " << rp.p.mu << endl;
+    #endif
+    /*
+      double mun=rp.n.mu, mup=rp.p.mu, msn=rp.n.ms, msp=rp.p.ms;
+      double hed=rp.hb->ed, hpr=rp.hb->pr, part;
+      if (rp.pf_index==1) part=1000.0;
+      else if (rp.pf_index==2) part=100.0;
+      else if (rp.pf_index==3) part=40.0;
+      else if (rp.pf_index==4) part=20.0;
+      else if (rp.pf_index==5) part=5.0;
+      else if (rp.pf_index==6) part=3.0;
+      else if (rp.pf_index==7) part=1.0;
+      else part=0.0;
+      eosa.calc_e(rp.n,rp.p,rp.hb);
+    
+      rp.n.mu=(rp.n.mu*part+mun)/(part+1.0);
+      rp.p.mu=(rp.p.mu*part+mup)/(part+1.0);
+      rp.n.ms=(rp.n.ms*part+msn)/(part+1.0);
+      rp.p.ms=(rp.p.ms*part+msp)/(part+1.0);
+      rp.hb->ed=(rp.hb->ed*part+hed)/(part+1.0);
+      rp.hb->pr=(rp.hb->pr*part+hpr)/(part+1.0);
+    */
+
+    if (rp.n.n<=0.0) {
+      if (rp.p.n<=0.0) {
+	dydx[0]=0.0;
+	dydx[1]=0.0;
+	dydx[2]=0.0;
+	dydx[3]=0.0;
+      } else {
+	dydx[0]=0.0;
+	dydx[1]=sy[3];
+	dydx[2]=0.0;
+	if (model!="apr" && model!="gp") {
+	  dydx[3]=(rp.p.mu-rp.mup)/rp.qpp;
+	} else {
+	  dydx[3]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[3]*sy[3])/rp.qpp;
+	}
+      }
+    } else if (rp.p.n<=0.0) {
+      dydx[0]=sy[2];
+      dydx[1]=0.0;
+      if (model!="apr" && model!="gp") {
+	dydx[2]=(rp.n.mu-rp.mun)/rp.qnn;
+      } else {
+	dydx[2]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+      }
+      dydx[3]=0.0;
+    } else {
+      if (rhsmode==false) {
+	if (model!="apr" && model!="gp") {
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	  rhsn/=det;
+	  rhsp/=det;
+#ifdef DEBUG
+	  cout << "K2: " << rhsn << " " << rhsp << " " << rp.n.mu << " "
+	       << rp.qpp << endl;
+	  cout << "L2: " << rp.qnp << " " << rp.qnn << " "
+	       << rp.p.mu << " " << rp.mun << endl;
+	  #endif
+	} else {
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+		dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qpp-
+	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+	     dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+		dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnn-
+	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+	     dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qnp;
+	  rhsn/=det;
+	  rhsp/=det;
+	}
+      } else {
+	if (model!="apr" && model!="gp") {
+	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
+	  rhsp=0.0;
+	} else {
+	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+	  rhsp=0.0;
+	}
+      }
+    
+      dydx[0]=sy[2];
+      dydx[1]=sy[3];
+      dydx[2]=rhsn;
+      dydx[3]=rhsp;
+    }
+  
+    //--------------------------------------------
+    // Return sensible results 
+
+    if (!std::isfinite(dydx[2])) {
+      cout << "3 not finite." << endl;
+      dydx[2]=0.0;
+    }
+    if (!std::isfinite(dydx[3])) {
+      cout << "4 not finite." << endl;
+      dydx[3]=0.0;
+    }
+  
+    return 0;
+  }
+
+  /** \brief Desc
+   */
+  double solve_qnn_neq_qnp(double lmonfact, int argc) {
     bool guessdone;
     int debug=0;
     double dx, xrhs, delta, epsi;
@@ -1119,7 +1270,7 @@ public:
     //----------------------------------------------
     // Try ode_it_solve
 
-    if (true) {
+    if (argc>=2) {
       ubvector ox(ngrid);
       ubmatrix oy(ngrid,rel->ne);
       for(int i=1;i<=ngrid;i++) {
@@ -1130,7 +1281,7 @@ public:
       }
       ode_it_funct11 f_derivs=std::bind
 	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	 (&seminf_nr::derivs2),this,std::placeholders::_1,std::placeholders::_2,
+	 (&seminf_nr::difeq2),this,std::placeholders::_1,std::placeholders::_2,
 	 std::placeholders::_3);       
       ode_it_funct11 f_left=std::bind
 	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
@@ -1619,12 +1770,19 @@ public:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double derivs2(size_t ieq, double x, ubmatrix_row &y) {
+  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
     ubvector y2=y, dydx(5);
-    vector_out(cout,y2);
-    derivs(x,y2,dydx);
-    vector_out(cout,dydx);
-    exit(-1);
+#ifdef DEBUG
+    cout << "H2: " << y2(0) << " " << y2(1) << " " << y2(2) << " "
+	 << y2(3) << " " << y2(4) << endl;
+    #endif
+    derivs2(x,y2,dydx);
+#ifdef DEBUG
+    cout << "J2: " << dydx(0) << " " << dydx(1) << " " << dydx(2) << " "
+	 << dydx(3) << " " << dydx(4) << endl;
+    char ch;
+    cin >> ch;
+    #endif
     return dydx[ieq]*y2[4];
   }
 
@@ -1641,10 +1799,20 @@ public:
       exit(-1);
     }
 
-    if (ieq==0) return y[0]-(rp.nn0-delta*exp(big*expo));
-    else if (ieq==1) return y[1]-(rp.np0-epsi*exp(big*expo));
-    else if (ieq==2) return y[2]+delta*expo*exp(big*expo);
-    return y[3]+epsi*expo*exp(big*expo);
+    /*
+      cout << y[0] << " " << y[1] << " " << y[2] << " " << y[3] << endl;
+      cout << rp.nn0 << " " << rp.np0 << " "
+      << delta << " " << epsi << " " << big << " "
+      << expo << endl;
+    */
+    
+    double ret;
+    if (ieq==0) ret=y[0]-(rp.nn0-delta*exp(big*expo));
+    else if (ieq==1) ret=y[1]-(rp.np0-epsi*exp(big*expo));
+    else if (ieq==2) ret=y[2]+delta*expo*exp(big*expo);
+    else ret=y[3]+epsi*expo*exp(big*expo);
+    //cout << "I " << ieq << " " << ret << endl;
+    return ret;
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
@@ -1829,6 +1997,18 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
 	s(3,jsf)=y(2,1)-(rp->np0-epsi*exp(big*expo));
 	s(4,jsf)=y(3,1)+delta*expo*exp(big*expo);
 	s(5,jsf)=y(4,1)+epsi*expo*exp(big*expo);
+	/*
+	cout << y(1,1) << " " << y(2,1) << " "
+	<< y(3,1) << " " << y(4,1) << endl;
+	cout << rp->nn0 << " " << rp->np0 << " "
+	<< delta << " " << epsi << " " << big << " "
+	<< expo << endl;
+	cout << "I " << 0 << " " << s(2,jsf) << endl;
+	cout << "I " << 0 << " " << s(3,jsf) << endl;
+	cout << "I " << 0 << " " << s(4,jsf) << endl;
+	cout << "I " << 0 << " " << s(5,jsf) << endl;
+	exit(-1);
+	*/
       }
       
     } else if (k>k2) {
@@ -1852,11 +2032,31 @@ int seminf_nr_relax::difeq(int k, int k1, int k2, int jsf, int is1,
       
       for(int i=1;i<=5;i++) exy[i]=(y(i,k)+y(i,k-1))/2.0;
       exx=(x[k]+x[k-1])/2.0*exy[5];
+
+#ifdef DEBUG
+      cout << "H: ";
+      for(int i=1;i<=5;i++) {
+	cout << exy[i] << " ";
+      }
+      cout << endl;
+      #endif
       
       snp->derivs(exx,exy,exdy);
       exdy[5]=0.0;
-      for(int i=1;i<=5;i++) s(i,jsf)=y(i,k)-y(i,k-1)-
-			  dx*exy[5]*exdy[i];
+
+#ifdef DEBUG
+      cout << "J: ";
+      for(int i=1;i<=5;i++) {
+	cout << exdy[i] << " ";
+      }
+      cout << endl;
+
+      exit(-1);
+      #endif
+
+      for(int i=1;i<=5;i++) {
+	s(i,jsf)=y(i,k)-y(i,k-1)-dx*exy[5]*exdy[i];
+      }
 
     }
 
