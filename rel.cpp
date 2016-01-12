@@ -45,6 +45,7 @@
 #include <o2scl/mroot_hybrids.h>
 #include <o2scl/mm_funct.h>
 #include <o2scl/interp.h>
+#include <o2scl/ode_it_solve.h>
 
 #include "relax.h"
 
@@ -59,9 +60,95 @@ typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
 
 static const int ngrid=700;
 
-//--------------------------------------------
-// Structure for relax parameters
+class ode_it_solve2 :
+  public ode_it_solve<ode_it_funct11,ubvector,ubmatrix,ubmatrix_row,
+		      ubvector,ubmatrix> {
 
+protected:
+  
+  double eps;
+  
+public:
+  
+  ode_it_solve2() : ode_it_solve<ode_it_funct11,ubvector,ubmatrix,
+				 ubmatrix_row,ubvector,ubmatrix>() {
+    eps=1.0e-9;
+  }
+  
+protected:
+  
+  /** \brief Compute the derivatives of the LHS boundary conditions
+
+      This function computes \f$ \partial f_{left,\mathrm{ieq}} /
+      \partial y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_left(size_t ieq, size_t ivar, double x,
+			 ubmatrix_row &y) {
+    
+    double ret, dydx;
+
+    h=eps*fabs(y[ivar]);
+    
+    y[ivar]+=h;
+    ret=(*fl)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fl)(ieq,x,y);
+    
+    ret/=h;
+    return ret;
+  }
+  
+  /** \brief Compute the derivatives of the RHS boundary conditions
+	
+      This function computes \f$ \partial f_{right,\mathrm{ieq}} /
+      \partial y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_right(size_t ieq, size_t ivar, double x,
+			  ubmatrix_row &y) {
+
+    double ret, dydx;
+    
+    h=eps*fabs(y[ivar]);
+
+    y[ivar]+=h;
+    ret=(*fr)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fr)(ieq,x,y);
+    
+    ret/=h;
+    return ret;
+  }
+  
+  /** \brief Compute the finite-differenced part of the 
+      differential equations
+
+      This function computes \f$ \partial f_{\mathrm{ieq}} / \partial
+      y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_derivs(size_t ieq, size_t ivar, double x,
+			   ubmatrix_row &y) {
+
+    double ret, dydx;
+    
+    h=eps*fabs(y[ivar]);
+
+    y[ivar]+=h;
+    ret=(*fd)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fd)(ieq,x,y);
+    
+    ret/=h;
+    
+    return ret;
+  }
+
+};
+
+/** \brief Structure for relax parameters
+ */
 class relaxp {
 
 public:
@@ -130,7 +217,7 @@ public:
   //--------------------------------------------
   // Main
 
-  int run(int argv, char *argc[]) {
+  int run(int argc, char *argv[]) {
 
     bool flattendone;
     bool summaryout=true;
@@ -415,7 +502,40 @@ public:
 	    ystor[k][i]=rel->y(k,i);
 	  }
 	}
-  
+	
+	//----------------------------------------------
+	// Try ode_it_solve
+	
+	if (argc>=2) {
+	  ubvector ox(ngrid);
+	  ubmatrix oy(ngrid,rel->ne);
+	  for(int i=1;i<=ngrid;i++) {
+	    ox[i-1]=rel->x[i];
+	    for(int j=1;j<=rel->ne;j++) {
+	      oy(i-1,j-1)=rel->y(j,i);
+	    }
+	  }
+	  ode_it_funct11 f_derivs=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::difeq2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);       
+	  ode_it_funct11 f_left=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::left2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);       
+	  ode_it_funct11 f_right=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::right2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);   
+	  ode_it_solve2 oit;
+	  ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
+	  ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
+	  oit.verbose=2;
+	  oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
+		    A,rhs,dy);
+	  exit(-1);
+	}
+	
 	//--------------------------------------------
 	// Solve equations
 
@@ -447,7 +567,7 @@ public:
 	}
 
 	if (iterfile) {
-	  string soutt=((string)argc[1])+"/it"+ itos(j)+".out";
+	  string soutt=((string)argv[1])+"/it"+ itos(j)+".out";
 	  fout.open(soutt.c_str());
 	  fout.setf(ios::scientific);
 	  fout << "x sigma omega rho sigmap omegap rhop" << endl;
@@ -605,18 +725,18 @@ public:
       surf=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
 		    at.get_column("esurf"));
       surf2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("esurf2"));
+		     at.get_column("esurf2"));
       sbulk=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("ebulk"));
+		     at.get_column("ebulk"));
       sgrad=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("egrad"));
+		     at.get_column("egrad"));
       thick=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("thickint"));
+		     at.get_column("thickint"));
 
       if (pf_index>=2) {
 
 	wd=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		       at.get_column("wdint"));
+		    at.get_column("wdint"));
 	wd*=hns;
 
 	wd2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
@@ -761,6 +881,100 @@ public:
     return 0;
   }
 
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
+
+#ifdef NEVER_DEFINED
+    
+    gs=rp->rmf_eos.cs*rp->rmf_eos.ms;
+    gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
+    gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
+    
+    dx=x[k]-x[k-1];
+    phi=(y(1,k)+y(1,k-1))/2.0;
+    v=(y(2,k)+y(2,k-1))/2.0;
+    double r=(y(3,k)+y(3,k-1))/2.0;
+    phip=(y(4,k)+y(4,k-1))/2.0;
+    vp=(y(5,k)+y(5,k-1))/2.0;
+    double rprime=(y(6,k)+y(6,k-1))/2.0;
+    
+    rp->n.nu=rp->mun-gw*v+0.5*gr*r;
+    rp->p.nu=rp->mup-gw*v-0.5*gr*r;
+    
+    rp->rmf_eos.calc_eq_p(rp->n,rp->p,phi,v,r,fn,fn2,fn3,rp->hb);
+    
+    s(1,jsf)=y(1,k)-y(1,k-1)-dx*phip;
+    s(2,jsf)=y(2,k)-y(2,k-1)-dx*vp;
+    s(3,jsf)=y(3,k)-y(3,k-1)-dx*rprime;
+    s(4,jsf)=y(4,k)-y(4,k-1)-dx*fn;
+    s(5,jsf)=y(5,k)-y(5,k-1)-dx*fn2;
+    s(6,jsf)=y(6,k)-y(6,k-1)-dx*fn3;
+
+#endif
+    return 0.0;
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double left2(size_t ieq, double x, ubmatrix_row &y) {
+    
+#ifdef NEVER_DEFINED
+    s(4,ne+indexv[1])=1.0;
+    s(4,ne+indexv[2])=0.0;
+    s(4,ne+indexv[3])=0.0;
+    s(4,ne+indexv[4])=0.0;
+    s(4,ne+indexv[5])=0.0;
+    s(4,ne+indexv[6])=0.0;
+    s(4,jsf)=y(1,1)-rp->phi0;
+    s(5,ne+indexv[1])=0.0;
+    s(5,ne+indexv[2])=1.0;
+    s(5,ne+indexv[3])=0.0;
+    s(5,ne+indexv[4])=0.0;
+    s(5,ne+indexv[5])=0.0;
+    s(5,ne+indexv[6])=0.0;
+    s(5,jsf)=y(2,1)-rp->v0;
+    s(6,ne+indexv[1])=0.0;
+    s(6,ne+indexv[2])=0.0;
+    s(6,ne+indexv[3])=1.0;
+    s(6,ne+indexv[4])=0.0;
+    s(6,ne+indexv[5])=0.0;
+    s(6,ne+indexv[6])=0.0;
+    s(6,jsf)=y(3,1)-rp->r0;
+#endif
+    
+    return 0.0;
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double right2(size_t ieq, double x, ubmatrix_row &y) {
+#ifdef NEVER_DEFINED
+    s(1,ne+indexv[1])=1.0;
+    s(1,ne+indexv[2])=0.0;
+    s(1,ne+indexv[3])=0.0;
+    s(1,ne+indexv[4])=0.0;
+    s(1,ne+indexv[5])=0.0;
+    s(1,ne+indexv[6])=0.0;
+    s(1,jsf)=y(1,ngrid);
+    s(2,ne+indexv[1])=0.0;
+    s(2,ne+indexv[2])=1.0;
+    s(2,ne+indexv[3])=0.0;
+    s(2,ne+indexv[4])=0.0;
+    s(2,ne+indexv[5])=0.0;
+    s(2,ne+indexv[6])=0.0;
+    s(2,jsf)=y(2,ngrid);
+    s(3,ne+indexv[1])=0.0;
+    s(3,ne+indexv[2])=0.0;
+    s(3,ne+indexv[3])=1.0;
+    s(3,ne+indexv[4])=0.0;
+    s(3,ne+indexv[5])=0.0;
+    s(3,ne+indexv[6])=0.0;
+    s(3,jsf)=y(3,ngrid);
+#endif
+    return 0.0;
+  }
+
 };
 
 int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
@@ -807,68 +1021,22 @@ int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
 
   double phi, v, phip, vp, fn, fn2, dx, mstar;
   double fn3, kfn, kfp;
-  double gs, gw, gr, hbarn;
 
-  gs=rp->rmf_eos.cs*rp->rmf_eos.ms;
-  gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
-  gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
-  
-  // 10/9/03 - Seems like this is repetitive. 
-  // s[4][ne+indexv[1]] should be calculated already in calcderiv??
   if (k==k1) {
-    if (nb==3) {
-      s(4,ne+indexv[1])=1.0;
-      s(4,ne+indexv[2])=0.0;
-      s(4,ne+indexv[3])=0.0;
-      s(4,ne+indexv[4])=0.0;
-      s(4,ne+indexv[5])=0.0;
-      s(4,ne+indexv[6])=0.0;
-      s(4,jsf)=y(1,1)-rp->phi0;
-      s(5,ne+indexv[1])=0.0;
-      s(5,ne+indexv[2])=1.0;
-      s(5,ne+indexv[3])=0.0;
-      s(5,ne+indexv[4])=0.0;
-      s(5,ne+indexv[5])=0.0;
-      s(5,ne+indexv[6])=0.0;
-      s(5,jsf)=y(2,1)-rp->v0;
-      s(6,ne+indexv[1])=0.0;
-      s(6,ne+indexv[2])=0.0;
-      s(6,ne+indexv[3])=1.0;
-      s(6,ne+indexv[4])=0.0;
-      s(6,ne+indexv[5])=0.0;
-      s(6,ne+indexv[6])=0.0;
-      s(6,jsf)=y(3,1)-rp->r0;
-    } else {
-      cout << "What?" << endl;
-      exit(-1);
-    }
+    s(4,jsf)=y(1,1)-rp->phi0;
+    s(5,jsf)=y(2,1)-rp->v0;
+    s(6,jsf)=y(3,1)-rp->r0;
 
   } else if (k>k2) {
-    if (nb==3) {
-      s(1,ne+indexv[1])=1.0;
-      s(1,ne+indexv[2])=0.0;
-      s(1,ne+indexv[3])=0.0;
-      s(1,ne+indexv[4])=0.0;
-      s(1,ne+indexv[5])=0.0;
-      s(1,ne+indexv[6])=0.0;
-      s(1,jsf)=y(1,ngrid);
-      s(2,ne+indexv[1])=0.0;
-      s(2,ne+indexv[2])=1.0;
-      s(2,ne+indexv[3])=0.0;
-      s(2,ne+indexv[4])=0.0;
-      s(2,ne+indexv[5])=0.0;
-      s(2,ne+indexv[6])=0.0;
-      s(2,jsf)=y(2,ngrid);
-      s(3,ne+indexv[1])=0.0;
-      s(3,ne+indexv[2])=0.0;
-      s(3,ne+indexv[3])=1.0;
-      s(3,ne+indexv[4])=0.0;
-      s(3,ne+indexv[5])=0.0;
-      s(3,ne+indexv[6])=0.0;
-      s(3,jsf)=y(3,ngrid);
-    }
+    s(1,jsf)=y(1,ngrid);
+    s(2,jsf)=y(2,ngrid);
+    s(3,jsf)=y(3,ngrid);
 
   } else {
+
+    double gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
+    double gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
+    
     dx=x[k]-x[k-1];
     phi=(y(1,k)+y(1,k-1))/2.0;
     v=(y(2,k)+y(2,k-1))/2.0;

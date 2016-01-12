@@ -104,9 +104,95 @@ double nprhs;
 /// Desc
 double rhslength;
 
-//--------------------------------------------
-// Structure for relax parameters
+class ode_it_solve2 :
+  public ode_it_solve<ode_it_funct11,ubvector,ubmatrix,ubmatrix_row,
+		      ubvector,ubmatrix> {
 
+protected:
+  
+  double eps;
+  
+public:
+  
+  ode_it_solve2() : ode_it_solve<ode_it_funct11,ubvector,ubmatrix,
+				 ubmatrix_row,ubvector,ubmatrix>() {
+    eps=1.0e-9;
+  }
+  
+protected:
+  
+  /** \brief Compute the derivatives of the LHS boundary conditions
+
+      This function computes \f$ \partial f_{left,\mathrm{ieq}} /
+      \partial y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_left(size_t ieq, size_t ivar, double x,
+			 ubmatrix_row &y) {
+    
+    double ret, dydx;
+
+    h=eps*fabs(y[ivar]);
+    
+    y[ivar]+=h;
+    ret=(*fl)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fl)(ieq,x,y);
+    
+    ret/=h;
+    return ret;
+  }
+  
+  /** \brief Compute the derivatives of the RHS boundary conditions
+	
+      This function computes \f$ \partial f_{right,\mathrm{ieq}} /
+      \partial y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_right(size_t ieq, size_t ivar, double x,
+			  ubmatrix_row &y) {
+
+    double ret, dydx;
+    
+    h=eps*fabs(y[ivar]);
+
+    y[ivar]+=h;
+    ret=(*fr)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fr)(ieq,x,y);
+    
+    ret/=h;
+    return ret;
+  }
+  
+  /** \brief Compute the finite-differenced part of the 
+      differential equations
+
+      This function computes \f$ \partial f_{\mathrm{ieq}} / \partial
+      y_{\mathrm{ivar}} \f$
+  */
+  virtual double fd_derivs(size_t ieq, size_t ivar, double x,
+			   ubmatrix_row &y) {
+
+    double ret, dydx;
+    
+    h=eps*fabs(y[ivar]);
+
+    y[ivar]+=h;
+    ret=(*fd)(ieq,x,y);
+    
+    y[ivar]-=h;
+    ret-=(*fd)(ieq,x,y);
+    
+    ret/=h;
+    
+    return ret;
+  }
+
+};
+
+/** \brief Structure for relax parameters
+ */
 class relaxp {
 
 public:
@@ -1291,7 +1377,7 @@ public:
 	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
 	 (&seminf_nr::right2),this,std::placeholders::_1,std::placeholders::_2,
 	 std::placeholders::_3);   
-      ode_it_solve<> oit;
+      ode_it_solve2 oit;
       ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
       ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
       oit.verbose=2;
