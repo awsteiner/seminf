@@ -132,6 +132,7 @@ protected:
     double ret, dydx;
 
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
     
     y[ivar]+=h;
     ret=(*fl)(ieq,x,y);
@@ -154,6 +155,7 @@ protected:
     double ret, dydx;
     
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
 
     y[ivar]+=h;
     ret=(*fr)(ieq,x,y);
@@ -177,6 +179,7 @@ protected:
     double ret, dydx;
     
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
 
     y[ivar]+=h;
     ret=(*fd)(ieq,x,y);

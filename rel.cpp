@@ -58,7 +58,7 @@ typedef boost::numeric::ublas::vector<double> ubvector;
 typedef boost::numeric::ublas::matrix<double> ubmatrix;
 typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
 
-static const int ngrid=700;
+static const int ngrid=100;
 
 class ode_it_solve2 :
   public ode_it_solve<ode_it_funct11,ubvector,ubmatrix,ubmatrix_row,
@@ -86,8 +86,9 @@ protected:
 			 ubmatrix_row &y) {
     
     double ret, dydx;
-
+    
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
     
     y[ivar]+=h;
     ret=(*fl)(ieq,x,y);
@@ -110,6 +111,7 @@ protected:
     double ret, dydx;
     
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
 
     y[ivar]+=h;
     ret=(*fr)(ieq,x,y);
@@ -133,6 +135,7 @@ protected:
     double ret, dydx;
     
     h=eps*fabs(y[ivar]);
+    if (fabs(h)<1.e-15) h=eps;
 
     y[ivar]+=h;
     ret=(*fd)(ieq,x,y);
@@ -292,7 +295,7 @@ public:
     double sprotfrac=0.49;
     double delta;
     bool guessdone=false;
-    double dx=0.01;
+    double dx=7.0/((double)ngrid);
     double fn;
     double fn2;
     double fn3;
@@ -506,7 +509,7 @@ public:
 	//----------------------------------------------
 	// Try ode_it_solve
 	
-	if (argc>=2) {
+	if (true) {
 	  ubvector ox(ngrid);
 	  ubmatrix oy(ngrid,rel->ne);
 	  for(int i=1;i<=ngrid;i++) {
@@ -530,18 +533,25 @@ public:
 	  ode_it_solve2 oit;
 	  ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
 	  ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
-	  oit.verbose=2;
+	  oit.verbose=1;
+	  oit.tol_rel=conve;
 	  oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
 		    A,rhs,dy);
-	  exit(-1);
-	}
-	
-	//--------------------------------------------
-	// Solve equations
 
-	cout << "Going to solve." << endl;
-	rel->solve(conve,slowc);
-	cout << "Done with solve." << endl;
+	  for(int i=1;i<=ngrid;i++) {
+	    rel->x[i]=ox[i-1];
+	    for(int j=1;j<=rel->ne;j++) {
+	      rel->y(j,i)=oy(i-1,j-1);
+	    }
+	  }
+
+	} else {
+	
+	  //--------------------------------------------
+	  // Solve equations
+	  
+	  rel->solve(conve,slowc);
+	}
   
 	if (outputiter) {
 	  cout << j << " " << rel->x[ngrid]-rel->x[1] << " " 
@@ -599,8 +609,46 @@ public:
     
       } else {
 	cout << "Going to final solution." << endl;
-	conve=finalconverge;
-	rel->solve(conve,slowc);
+	if (true) {
+	  ubvector ox(ngrid);
+	  ubmatrix oy(ngrid,rel->ne);
+	  for(int i=1;i<=ngrid;i++) {
+	    ox[i-1]=rel->x[i];
+	    for(int j=1;j<=rel->ne;j++) {
+	      oy(i-1,j-1)=rel->y(j,i);
+	    }
+	  }
+	  ode_it_funct11 f_derivs=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::difeq2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);       
+	  ode_it_funct11 f_left=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::left2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);       
+	  ode_it_funct11 f_right=std::bind
+	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+	     (&seminf_rel::right2),this,std::placeholders::_1,
+	     std::placeholders::_2,std::placeholders::_3);   
+	  ode_it_solve2 oit;
+	  ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
+	  ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
+	  oit.verbose=1;
+	  oit.tol_rel=finalconverge;
+	  oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
+		    A,rhs,dy);
+
+	  for(int i=1;i<=ngrid;i++) {
+	    rel->x[i]=ox[i-1];
+	    for(int j=1;j<=rel->ne;j++) {
+	      rel->y(j,i)=oy(i-1,j-1);
+	    }
+	  }
+
+	} else {
+	  conve=finalconverge;
+	  rel->solve(conve,slowc);
+	}
       }
 
       //--------------------------------------------
@@ -885,94 +933,55 @@ public:
    */
   double difeq2(size_t ieq, double x, ubmatrix_row &y) {
 
-#ifdef NEVER_DEFINED
-    
-    gs=rp->rmf_eos.cs*rp->rmf_eos.ms;
-    gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
-    gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
-    
-    dx=x[k]-x[k-1];
-    phi=(y(1,k)+y(1,k-1))/2.0;
-    v=(y(2,k)+y(2,k-1))/2.0;
-    double r=(y(3,k)+y(3,k-1))/2.0;
-    phip=(y(4,k)+y(4,k-1))/2.0;
-    vp=(y(5,k)+y(5,k-1))/2.0;
-    double rprime=(y(6,k)+y(6,k-1))/2.0;
-    
-    rp->n.nu=rp->mun-gw*v+0.5*gr*r;
-    rp->p.nu=rp->mup-gw*v-0.5*gr*r;
-    
-    rp->rmf_eos.calc_eq_p(rp->n,rp->p,phi,v,r,fn,fn2,fn3,rp->hb);
-    
-    s(1,jsf)=y(1,k)-y(1,k-1)-dx*phip;
-    s(2,jsf)=y(2,k)-y(2,k-1)-dx*vp;
-    s(3,jsf)=y(3,k)-y(3,k-1)-dx*rprime;
-    s(4,jsf)=y(4,k)-y(4,k-1)-dx*fn;
-    s(5,jsf)=y(5,k)-y(5,k-1)-dx*fn2;
-    s(6,jsf)=y(6,k)-y(6,k-1)-dx*fn3;
+    double gw=rp.rmf_eos.cw*rp.rmf_eos.mw;
+    double gr=rp.rmf_eos.cr*rp.rmf_eos.mr;
 
-#endif
-    return 0.0;
+    double phi=y[0];
+    double v=y[1];
+    double r=y[2];
+    double phip=y[3];
+    double vp=y[4];
+    double rprime=y[5];
+    
+    rp.n.nu=rp.mun-gw*v+0.5*gr*r;
+    rp.p.nu=rp.mup-gw*v-0.5*gr*r;
+
+    double fn, fn2, fn3;
+    rp.rmf_eos.calc_eq_p(rp.n,rp.p,phi,v,r,fn,fn2,fn3,rp.hb);
+
+    if (ieq==0) {
+      return phip;
+    } else if (ieq==1) {
+      return vp;
+    } else if (ieq==2) {
+      return rprime;
+    } else if (ieq==3) {
+      return fn;
+    } else if (ieq==4) {
+      return fn2;
+    }
+    return fn3;
+    
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
   double left2(size_t ieq, double x, ubmatrix_row &y) {
-    
-#ifdef NEVER_DEFINED
-    s(4,ne+indexv[1])=1.0;
-    s(4,ne+indexv[2])=0.0;
-    s(4,ne+indexv[3])=0.0;
-    s(4,ne+indexv[4])=0.0;
-    s(4,ne+indexv[5])=0.0;
-    s(4,ne+indexv[6])=0.0;
-    s(4,jsf)=y(1,1)-rp->phi0;
-    s(5,ne+indexv[1])=0.0;
-    s(5,ne+indexv[2])=1.0;
-    s(5,ne+indexv[3])=0.0;
-    s(5,ne+indexv[4])=0.0;
-    s(5,ne+indexv[5])=0.0;
-    s(5,ne+indexv[6])=0.0;
-    s(5,jsf)=y(2,1)-rp->v0;
-    s(6,ne+indexv[1])=0.0;
-    s(6,ne+indexv[2])=0.0;
-    s(6,ne+indexv[3])=1.0;
-    s(6,ne+indexv[4])=0.0;
-    s(6,ne+indexv[5])=0.0;
-    s(6,ne+indexv[6])=0.0;
-    s(6,jsf)=y(3,1)-rp->r0;
-#endif
-    
-    return 0.0;
+    if (ieq==0) {
+      return y[0]-rp.phi0;
+    }
+    if (ieq==1) {
+      return y[1]-rp.v0;
+    }
+    return y[2]-rp.r0;
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
   double right2(size_t ieq, double x, ubmatrix_row &y) {
-#ifdef NEVER_DEFINED
-    s(1,ne+indexv[1])=1.0;
-    s(1,ne+indexv[2])=0.0;
-    s(1,ne+indexv[3])=0.0;
-    s(1,ne+indexv[4])=0.0;
-    s(1,ne+indexv[5])=0.0;
-    s(1,ne+indexv[6])=0.0;
-    s(1,jsf)=y(1,ngrid);
-    s(2,ne+indexv[1])=0.0;
-    s(2,ne+indexv[2])=1.0;
-    s(2,ne+indexv[3])=0.0;
-    s(2,ne+indexv[4])=0.0;
-    s(2,ne+indexv[5])=0.0;
-    s(2,ne+indexv[6])=0.0;
-    s(2,jsf)=y(2,ngrid);
-    s(3,ne+indexv[1])=0.0;
-    s(3,ne+indexv[2])=0.0;
-    s(3,ne+indexv[3])=1.0;
-    s(3,ne+indexv[4])=0.0;
-    s(3,ne+indexv[5])=0.0;
-    s(3,ne+indexv[6])=0.0;
-    s(3,jsf)=y(3,ngrid);
-#endif
-    return 0.0;
+    if (ieq==0) return y[0];
+    if (ieq==1) return y[1];
+    return y[2];
   }
 
 };
@@ -1033,7 +1042,7 @@ int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
     s(3,jsf)=y(3,ngrid);
 
   } else {
-
+    
     double gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
     double gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
     
