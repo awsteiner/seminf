@@ -47,8 +47,6 @@
 #include <o2scl/interp.h>
 #include <o2scl/ode_it_solve.h>
 
-#include "relax.h"
-
 using namespace std;
 using namespace o2scl;
 using namespace o2scl_hdf;
@@ -176,30 +174,114 @@ public:
 
 };
 
-class s3relax : public relax {
-
-public:
-
-  relaxp *rp;
-
-  s3relax(int tne, int tnb, int tngrid);
-
-  int iter(int k, double err, double fac, ubvector_int &kmax,
-	   ubvector &errmax);
-
-  int difeq(int k, int k1, int k2, int jsf, int is1, int isf);
-  
-};
-
-s3relax::s3relax(int tne, int tnb, int tngrid) : 
-  relax(tne,tnb,tngrid) {}
-
-
+/** \brief Desc
+ */
 class seminf_rel {
+
+protected:
   
-public:
+  int nucmat(size_t nv, const ubvector &ex, ubvector &ey) {
+    double f1,f2,f3,sig,ome,rho;
+    fermion &n=rp.n, &p=rp.p;
+
+    n.nu=ex[0];
+    p.nu=ex[1];
+    sig=ex[2];
+    ome=ex[3];
+    rho=ex[4];
+
+    rp.rmf_eos.calc_eq_p(n,p,sig,ome,rho,f1,f2,f3,rp.hb);
+
+    ey[0]=p.n+n.n-rp.nsat;
+    ey[1]=p.n-rp.nsat*rp.protfrac;
+    ey[2]=f1;
+    ey[3]=f2;
+    ey[4]=f3;
+
+    return 0;
+  }
+
+  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+    double pleft, pright, munleft, munright;
   
-  relaxp rp;
+    fermion &n=rp.n, &p=rp.p;
+    thermo &hb=rp.hb;
+
+    n.n=sx[0];
+    p.n=sx[1];
+    rp.rmf_eos.calc_e(n,p,hb);
+  
+    sy[0]=p.n-rp.protfrac*(p.n+n.n);
+    pleft=hb.pr;
+    munleft=n.mu;
+
+    n.n=sx[2];
+    p.n=0.001;
+    rp.rmf_eos.calc_e(n,p,hb);
+
+    pright=hb.pr;
+    munright=n.mu;
+
+    sy[1]=pleft-pright;
+    sy[2]=munleft-munright;
+
+    return 0;
+  }
+
+  /** \brief Differential equations to solve
+   */
+  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
+
+    double gw=rp.rmf_eos.cw*rp.rmf_eos.mw;
+    double gr=rp.rmf_eos.cr*rp.rmf_eos.mr;
+
+    double phi=y[0];
+    double v=y[1];
+    double r=y[2];
+    double phip=y[3];
+    double vp=y[4];
+    double rprime=y[5];
+    
+    rp.n.nu=rp.mun-gw*v+0.5*gr*r;
+    rp.p.nu=rp.mup-gw*v-0.5*gr*r;
+
+    double fn, fn2, fn3;
+    rp.rmf_eos.calc_eq_p(rp.n,rp.p,phi,v,r,fn,fn2,fn3,rp.hb);
+
+    if (ieq==0) {
+      return phip;
+    } else if (ieq==1) {
+      return vp;
+    } else if (ieq==2) {
+      return rprime;
+    } else if (ieq==3) {
+      return fn;
+    } else if (ieq==4) {
+      return fn2;
+    }
+    return fn3;
+    
+  }
+
+  /** \brief LHS boundary conditions
+   */
+  double left2(size_t ieq, double x, ubmatrix_row &y) {
+    if (ieq==0) {
+      return y[0]-rp.phi0;
+    }
+    if (ieq==1) {
+      return y[1]-rp.v0;
+    }
+    return y[2]-rp.r0;
+  }
+
+  /** \brief RHS boundary conditions
+   */
+  double right2(size_t ieq, double x, ubmatrix_row &y) {
+    if (ieq==0) return y[0];
+    if (ieq==1) return y[1];
+    return y[2];
+  }
   
   /** \brief Desc
    */
@@ -217,9 +299,14 @@ public:
     return 0.0;
   }
 
-  //--------------------------------------------
-  // Main
-
+  /** \brief Desc
+   */
+  relaxp rp;
+  
+public:
+  
+  /** \brief Main
+   */
   int run(int argc, char *argv[]) {
 
     bool flattendone;
@@ -260,14 +347,12 @@ public:
     int lastit;
     int npoints=64;
     ofstream fout;
-    double xstor[ngrid+1];
-    double ystor[ne+1][ngrid+1];
-    string dirname;
+    ubvector xstor(ngrid);
+    ubmatrix ystor(ne,ngrid);
 
     double sssv1=0.0;
     double sssv2=0.0;
     double temp;
-    double temppf;
     double qq;
     double sig;
     double ome;
@@ -328,12 +413,26 @@ public:
     
     //--------------------------------------------
     // Initializations for relaxation class
-
-    s3relax *rel=new s3relax(ne,nb,ngrid);
-    rel->rp=&rp;
-    rel->itmax=100;
+    
+    ode_it_solve2 oit;
+    ode_it_funct11 f_derivs=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_rel::difeq2),this,std::placeholders::_1,
+       std::placeholders::_2,std::placeholders::_3);       
+    ode_it_funct11 f_left=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_rel::left2),this,std::placeholders::_1,
+       std::placeholders::_2,std::placeholders::_3);       
+    ode_it_funct11 f_right=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_rel::right2),this,std::placeholders::_1,
+       std::placeholders::_2,std::placeholders::_3);   
     ubvector ox(ngrid);
-    ubmatrix oy(ngrid,rel->ne);
+    ubmatrix oy(ngrid,ne);
+    ubmatrix A(ngrid*ne,ngrid*ne);
+    ubvector rhs(ngrid*ne), dy(ngrid*ne);
+    if (outputiter) oit.verbose=1;
+    else oit.verbose=0;
     
     table<> at(1000);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
@@ -365,7 +464,8 @@ public:
       rp.nsat=rmf_eos.fn0(1.0-2.0*protfrac,eoatemp);
       rmf_eos.get_fields(rp.phi0,rp.v0,rp.r0);
     
-      cout << "Saturation density at x=" << protfrac << ": " << rp.nsat << endl;
+      cout << "Saturation density at x=" << protfrac << ": "
+	   << rp.nsat << endl;
       
       rp.mun=rp.n.mu;
       rp.mup=rp.p.mu;
@@ -395,9 +495,10 @@ public:
       }
 
       if (debug) {
-	cout << "phi0 v0 r0 mun mup" << endl 
-	     << rp.phi0 << " " << rp.v0 << " " << rp.r0 << " " << rp.mun
-	     << " " << rp.mup << endl;
+	cout << "phi0: " << rp.phi0 << "  v0: " << rp.v0 << " r0: "
+	     << rp.r0 << endl;
+	cout << " mun: " << rp.mun << " mup: " << rp.mup << endl;
+	cout << endl;
       }
 
       gs=rmf_eos.cs*rmf_eos.ms;
@@ -407,123 +508,73 @@ public:
       //----------------------------------------------
       // Construct guess
       
-      if (true) {
-
-	ox[0]=0.0;
-	oy(0,0)=rp.phi0;
-	oy(1,0)=rp.v0;
-	oy(2,0)=rp.r0;
-	oy(3,0)=-1.0e-3;
-	oy(4,0)=-4.0e-3;
-	if (fabs(protfrac-0.5)<0.0001) oy(5,0)=0.0;
-	else oy(5,0)=1.0e-4;
+      ox[0]=0.0;
+      oy(0,0)=rp.phi0;
+      oy(0,1)=rp.v0;
+      oy(0,2)=rp.r0;
+      oy(0,3)=-1.0e-3;
+      oy(0,4)=-1.0e-3;
+      if (fabs(protfrac-0.5)<0.0001) oy(0,5)=0.0;
+      else oy(0,5)=1.0e-4;
 	
-	rel->x[1]=0.0;
-	rel->y(1,1)=rp.phi0;
-	rel->y(2,1)=rp.v0;
-	rel->y(3,1)=rp.r0;
-	rel->y(4,1)=-1.0e-3;
-	rel->y(5,1)=-1.0e-3;
-	if (fabs(protfrac-0.5)<0.0001) rel->y(6,1)=0.0;
-	else rel->y(6,1)=1.0e-4;
+      //----------------------------------------------
+      // Use simple integration
 
-	//----------------------------------------------
-	// Use simple integration
+      rp.n.mu=rp.mun;
+      rp.p.mu=rp.mup;
+      rp.n.n=0.08;
+      rp.p.n=0.08;
 
-	for(int i=2;i<=ngrid;i++) {
-	  rel->x[i]=rel->x[i-1]+dx;
+      for(int i=1;i<ngrid;i++) {
+	ox[i]=ox[i-1]+dx;
 
-	  if (guessdone==false) {
-	    rp.n.nu=rp.mun-gw*rel->y(2,i-1)+0.5*gr*rel->y(3,i-1);
-	    rp.p.nu=rp.mup-gw*rel->y(2,i-1)-0.5*gr*rel->y(3,i-1);
+	if (guessdone==false) {
+	  rp.n.nu=rp.mun-gw*oy(i-1,1)+0.5*gr*oy(i-1,2);
+	  rp.p.nu=rp.mup-gw*oy(i-1,1)-0.5*gr*oy(i-1,2);
 	    
-	    rmf_eos.calc_eq_p(rp.n,rp.p,rel->y(1,i-1),rel->y(2,i-1),
-			      rel->y(3,i-1),fn,fn2,fn3,rp.hb);
+	  rp.n.mu=rp.mun;
+	  rp.p.mu=rp.mup;
+	  rmf_eos.calc_eq_p(rp.n,rp.p,oy(i-1,0),oy(i-1,1),
+			    oy(i-1,2),fn,fn2,fn3,rp.hb);
       
-	    rel->y(1,i)=rel->y(1,i-1)+dx*rel->y(4,i-1);
-	    rel->y(2,i)=rel->y(2,i-1)+dx*rel->y(5,i-1);
-	    rel->y(3,i)=rel->y(3,i-1)+dx*rel->y(6,i-1);
-	    rel->y(4,i)=rel->y(4,i-1)+dx*fn;
-	    rel->y(5,i)=rel->y(5,i-1)+dx*fn2;
-	    rel->y(6,i)=rel->y(6,i-1)+dx*fn3;
+	  oy(i,0)=oy(i-1,0)+dx*oy(i-1,3);
+	  oy(i,1)=oy(i-1,1)+dx*oy(i-1,4);
+	  oy(i,2)=oy(i-1,2)+dx*oy(i-1,5);
+	  oy(i,3)=oy(i-1,3)+dx*fn;
+	  oy(i,4)=oy(i-1,4)+dx*fn2;
+	  oy(i,5)=oy(i-1,5)+dx*fn3;
 
-	    if (rel->y(1,i)<0.0 || rel->y(2,i)<0.0) {
-	      guessdone=true;
-	      ilast=i-1;
-	      i=ngrid+10;
-	    }
-
-	  } else {
-	    for(int j=1;j<=6;j++) rel->y(j,i)=0.0;
+	  if (oy(i,0)<0.0 || oy(i,1)<0.0) {
+	    guessdone=true;
+	    ilast=i;
+	    i=ngrid+10;
 	  }
+	} else {
+	  for(int j=0;j<6;j++) oy(i,j)=0.0;
 	}
+      }
 
-	for(int i=1;i<ngrid;i++) {
-	  ox[i]=ox[i-1]+dx;
-
-	  if (guessdone==false) {
-	    rp.n.nu=rp.mun-gw*oy(1,i-1)+0.5*gr*oy(2,i-1);
-	    rp.p.nu=rp.mup-gw*oy(1,i-1)-0.5*gr*oy(2,i-1);
-	    
-	    rmf_eos.calc_eq_p(rp.n,rp.p,oy(0,i),oy(1,i-1),
-			      oy(2,i-1),fn,fn2,fn3,rp.hb);
-      
-	    oy(0,i)=oy(0,i-1)+dx*oy(3,i);
-	    oy(1,i)=oy(1,i-1)+dx*oy(4,i);
-	    oy(2,i)=oy(2,i-1)+dx*oy(5,i);
-	    oy(3,i)=oy(3,i-1)+dx*fn;
-	    oy(4,i)=oy(4,i-1)+dx*fn2;
-	    oy(5,i)=oy(5,i-1)+dx*fn3;
-
-	    if (oy(0,i)<0.0 || oy(1,i)<0.0) {
-	      guessdone=true;
-	      ilast=i;
-	      i=ngrid+10;
-	    }
-
-	  } else {
-	    for(int j=0;j<6;j++) oy(j-1,i)=0.0;
+      //----------------------------------------------
+      // Stretch the solution over the entire grid
+      // Start at the RHS, so that we can overwrite
+      // the original data. This works until we get
+      // to the left hand side, where we adjust accordingly
+	
+      ilast=18;
+      for(int i=ngrid-1;i>=0;i--) {
+	interp=(int)(((double)(i+1))/((double)ngrid)*((double)(ilast+1)))-1;
+	xinterp=dx*((double)(i+1))/((double)ngrid)*((double)(ilast+1));
+	ox[i]=xinterp;
+	if (i>9) {
+	  for(int j=0;j<6;j++) {
+	    oy(i,j)=oy(interp,j)+(xinterp-ox[interp])/dx*
+	      (oy(interp+1,j)-oy(interp,j));
 	  }
-	}
-
-	//----------------------------------------------
-	// Stretch the solution over the entire grid
-	// Start at the RHS, so that we can overwrite
-	// the original data. This works until we get
-	// to the left hand side, where we adjust accordingly
-
-	for(int i=ngrid;i>=1;i--) {
-	  interp=(int)(((double)i)/((double)ngrid)*((double)ilast));
-	  xinterp=dx*((double)i)/((double)ngrid)*((double)ilast);
-	  rel->x[i]=xinterp;
-	  if (i>10) {
-	    for(int j=1;j<=6;j++) 
-	      rel->y(j,i)=rel->y(j,interp)+
-		(xinterp-rel->x[interp])/dx*
-		(rel->y(j,interp+1)-rel->y(j,interp));
-	  } else {
-	    rel->y(1,i)=rp.phi0;
-	    rel->y(2,i)=rp.v0;
-	    rel->y(3,i)=rp.r0;
-	    for(int j=4;j<=6;j++) rel->y(j,i)=0.0;
-	  }
-	}
-
-	for(int i=ngrid-1;i>=0;i--) {
-	  interp=(int)(((double)i)/((double)ngrid)*((double)ilast));
-	  xinterp=dx*((double)i)/((double)ngrid)*((double)ilast);
-	  ox[i]=xinterp;
-	  if (i>9) {
-	    for(int j=0;j<6;j++) {
-	      oy(j,i)=oy(j,interp)+(xinterp-ox[interp])/dx*
-		(oy(j,interp+1)-oy(j,interp));
-	    }
-	  } else {
-	    oy(0,i)=rp.phi0;
-	    oy(1,i)=rp.v0;
-	    oy(2,i)=rp.r0;
-	    for(int j=3;j<6;j++) oy(j,i)=0.0;
-	  }
+	} else {
+	  oy(i,0)=rp.phi0;
+	  oy(i,1)=rp.v0;
+	  oy(i,2)=rp.r0;
+	  for(int j=3;j<6;j++) oy(i,j)=0.0;
 	}
       }
 
@@ -531,36 +582,9 @@ public:
       // Now we center the x-axis on zero, which makes it
       // easier to expand the grid later
 
-      xcent=rel->x[ngrid/2];
-      for(int i=1;i<=ngrid;i++) {
-	rel->x[i]-=xcent;
-      }
-
-      if (true || debug) {
-	for(int i=1;i<=ngrid;i+=ngrid/70) {
-	  cout.width(3);
-	  cout << i << " ";
-	  cout.setf(ios::showpos);
-	  cout << rel->x[i] << " " << rel->y(1,i) << " " << rel->y(2,i)
-	       << " " << rel->y(3,i) << endl;
-	  cout.unsetf(ios::showpos);
-	}
-      }
-
-      xcent=ox[ngrid/2];
-      for(int i=1;i<=ngrid;i++) {
+      xcent=ox[ngrid/2-1];
+      for(int i=0;i<ngrid;i++) {
 	ox[i]-=xcent;
-      }
-
-      if (true || debug) {
-	for(int i=0;i<ngrid;i+=ngrid/70) {
-	  cout.width(3);
-	  cout << i << " ";
-	  cout.setf(ios::showpos);
-	  cout << ox[i] << " " << oy(1,i) << " " << oy(2,i)
-	       << " " << oy(3,i) << endl;
-	  cout.unsetf(ios::showpos);
-	}
       }
 
       rp.convergeflag=true;
@@ -572,93 +596,46 @@ public:
       
 	//--------------------------------------------
 	// Store most recent result
-	for(int i=1;i<=ngrid;i++) {
-	  xstor[i]=rel->x[i];
-	  for(int k=1;k<=ne;k++) {
-	    ystor[k][i]=rel->y(k,i);
+	for(int i=0;i<ngrid;i++) {
+	  xstor[i]=ox[i];
+	  for(int k=0;k<ne;k++) {
+	    ystor(k,i)=oy(i,k);
 	  }
 	}
 	
 	//----------------------------------------------
 	// Try ode_it_solve
 	
-	if (true) {
-	  for(int i=1;i<=ngrid;i++) {
-	    ox[i-1]=rel->x[i];
-	    for(int j=1;j<=rel->ne;j++) {
-	      oy(i-1,j-1)=rel->y(j,i);
-	    }
-	  }
-	  ode_it_funct11 f_derivs=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::difeq2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);       
-	  ode_it_funct11 f_left=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::left2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);       
-	  ode_it_funct11 f_right=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::right2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);   
-	  ode_it_solve2 oit;
-	  ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
-	  ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
-	  oit.verbose=1;
-	  oit.tol_rel=conve;
-	  oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
-		    A,rhs,dy);
-
-	  for(int i=1;i<=ngrid;i++) {
-	    rel->x[i]=ox[i-1];
-	    for(int j=1;j<=rel->ne;j++) {
-	      rel->y(j,i)=oy(i-1,j-1);
-	    }
-	  }
-
-	} else {
-	
-	  //--------------------------------------------
-	  // Solve equations
+	oit.tol_rel=conve;
+	oit.solve(ngrid,ne,nb,ox,oy,f_derivs,f_left,f_right,
+		  A,rhs,dy);
 	  
-	  rel->solve(conve,slowc);
-	}
-  
 	if (outputiter) {
-	  cout << j << " " << rel->x[ngrid]-rel->x[1] << " " 
-	       << rel->y(4,1) << " " << rel->y(5,1) << " " 
-	       << rel->y(6,1) << " " 
-	       << rp.convergeflag << endl;
+	  cout << "j: ";
+	  cout.width(2);
+	  cout << j << "  x(left): " << ox(ngrid-1)
+	       << " sigma'(left): " << oy(0,3) << endl;
+	  cout << " omega'(left): " << oy(0,4);
+	  cout.setf(ios::showpos);
+	  cout << "   rho'(left): " << oy(0,5);
+	  cout.unsetf(ios::showpos);
+	  cout << " conflag: " << rp.convergeflag << endl;
 	}
       
-	if (fabs(rel->y(4,1))<derivlimit && 
-	    fabs(rel->y(5,1))<derivlimit && 
-	    fabs(rel->y(6,1))<derivlimit) {
+	if (fabs(oy(0,3))<derivlimit && fabs(oy(0,4))<derivlimit &&
+	    fabs(oy(0,5))<derivlimit) {
 	  flattendone=true;
 	  if (outputiter) cout << endl;
 	} else {
-	  // Why does this work?
-	  // The alternative of simply extending the LHS doesn't 
-	  // seem to work.
+	  // Why does this work? The alternative of simply extending
+	  // the LHS doesn't seem to work.
 	  if (rp.convergeflag==true) {
-	    for(int i=1;i<=ngrid;i++) {
-	      rel->x[i]*=fact;
+	    for(int i=0;i<ngrid;i++) {
+	      ox[i]*=fact;
 	    }
 	  }
 	}
-
-	if (iterfile) {
-	  string soutt=((string)argv[1])+"/it"+ itos(j)+".out";
-	  fout.open(soutt.c_str());
-	  fout.setf(ios::scientific);
-	  fout << "x sigma omega rho sigmap omegap rhop" << endl;
-	  for(int i=1;i<=ngrid;i++) {
-	    fout << rel->x[i] << " ";
-	    for(int k=1;k<=6;k++) fout << rel->y(k,i) << " ";
-	    fout << endl;
-	  }
-	  fout.close();
-	}
+	
       }
       lastit=j-1;
 
@@ -671,72 +648,37 @@ public:
 	// If convergence failed, use previous result
 	// for calculations
 
-	for(int i=1;i<=ngrid;i++) {
-	  rel->x[i]=xstor[i];
-	  for(int k=1;k<=ne;k++) {
-	    rel->y(k,i)=ystor[k][i];
+	for(int i=0;i<ngrid;i++) {
+	  ox[i]=xstor[i];
+	  for(int k=0;k<ne;k++) {
+	    oy(i,k)=ystor(k,i);
 	  }
 	}
     
       } else {
 	cout << "Going to final solution." << endl;
-	if (true) {
-	  for(int i=1;i<=ngrid;i++) {
-	    ox[i-1]=rel->x[i];
-	    for(int j=1;j<=rel->ne;j++) {
-	      oy(i-1,j-1)=rel->y(j,i);
-	    }
-	  }
-	  ode_it_funct11 f_derivs=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::difeq2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);       
-	  ode_it_funct11 f_left=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::left2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);       
-	  ode_it_funct11 f_right=std::bind
-	    (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	     (&seminf_rel::right2),this,std::placeholders::_1,
-	     std::placeholders::_2,std::placeholders::_3);   
-	  ode_it_solve2 oit;
-	  ubmatrix A(ngrid*rel->ne,ngrid*rel->ne);
-	  ubvector rhs(ngrid*rel->ne), dy(ngrid*rel->ne);
-	  oit.verbose=1;
-	  oit.tol_rel=finalconverge;
-	  oit.solve(ngrid,rel->ne,rel->nb,ox,oy,f_derivs,f_left,f_right,
-		    A,rhs,dy);
-
-	  for(int i=1;i<=ngrid;i++) {
-	    rel->x[i]=ox[i-1];
-	    for(int j=1;j<=rel->ne;j++) {
-	      rel->y(j,i)=oy(i-1,j-1);
-	    }
-	  }
-
-	} else {
-	  conve=finalconverge;
-	  rel->solve(conve,slowc);
-	}
+	oit.tol_rel=finalconverge;
+	oit.solve(ngrid,ne,nb,ox,oy,f_derivs,f_left,f_right,
+		  A,rhs,dy);
       }
 
       //--------------------------------------------
       // Output characteristics of final solution
 
-      for(int i=1;i<=ngrid;i++) {
-	at.set("x",i-1,rel->x[i]);
-	at.set("sigma",i-1,rel->y(1,i));
-	at.set("omega",i-1,rel->y(2,i));
-	at.set("rho",i-1,rel->y(3,i));
-	at.set("sigmap",i-1,rel->y(4,i));
-	at.set("omegap",i-1,rel->y(5,i));
-	at.set("rhop",i-1,rel->y(6,i));
+      for(int i=0;i<ngrid;i++) {
+	at.set("x",i,ox[i]);
+	at.set("sigma",i,oy(i,0));
+	at.set("omega",i,oy(i,1));
+	at.set("rho",i,oy(i,2));
+	at.set("sigmap",i,oy(i,3));
+	at.set("omegap",i,oy(i,4));
+	at.set("rhop",i,oy(i,5));
       }
 	
       //double *ebulklam;
       //double *rhoprime;
       //double *qpq;
-
+      
       //--------------------------------------------
       // Calculate rhon, rhop, energy, and ebulk at
       // every point in profile
@@ -745,14 +687,20 @@ public:
       delta=1.0-2.0*protfrac;
     
       for(int i=0;i<ngrid;i++) {
-	mstar=rmf_eos.mnuc-gs*rel->y(1,i);
+	mstar=rmf_eos.mnuc-gs*oy(0,i);
     
-	if (rp.mun-gw*rel->y(2,i)+gr*rel->y(3,i)/2.0<mstar) kfn=0.0;
-	else kfn=sqrt(pow(rp.mun-gw*rel->y(2,i)+gr*rel->y(3,i)/2.0,2.0)-
-		      mstar*mstar);
-	if (rp.mup-gw*rel->y(2,i)-gr*rel->y(3,i)/2.0<mstar) kfp=0.0;
-	else kfp=sqrt(pow(rp.mup-gw*rel->y(2,i)-gr*rel->y(3,i)/2.0,2.0)-
-		      mstar*mstar);
+	if (rp.mun-gw*oy(i,1)+gr*oy(i,2)/2.0<mstar) {
+	  kfn=0.0;
+	} else {
+	  kfn=sqrt(pow(rp.mun-gw*oy(i,1)+gr*oy(i,2)/2.0,2.0)-
+		   mstar*mstar);
+	}
+	if (rp.mup-gw*oy(i,1)-gr*oy(i,2)/2.0<mstar) {
+	  kfp=0.0;
+	} else {
+	  kfp=sqrt(pow(rp.mup-gw*oy(i,1)-gr*oy(i,2)/2.0,2.0)-
+		   mstar*mstar);
+	}
 
 	at.set("nn",i,pow(kfn,3.0)/3.0/pi2);
 	at.set("np",i,pow(kfp,3.0)/3.0/pi2);
@@ -763,15 +711,14 @@ public:
 	rp.p.ms=mstar;
 	rp.n.nu=sqrt(kfn*kfn+rp.n.ms*rp.n.ms);
 	rp.p.nu=sqrt(kfp*kfp+rp.p.ms*rp.p.ms);
-	rmf_eos.calc_eq_p(rp.n,rp.p,rel->y(1,i),rel->y(2,i),
-			  rel->y(3,i),f1,f2,f3,rp.hb);
+	rmf_eos.calc_eq_p(rp.n,rp.p,oy(0,i),oy(i,1),
+			  oy(i,2),f1,f2,f3,rp.hb);
 	rp.hb.ed=-rp.hb.pr+rp.n.n*rp.n.mu+rp.p.n*rp.p.mu;
 
 	at.set("ebulk",i,rp.hb.ed-rp.mup*at.get("np",i)-
 	       rp.mun*at.get("nn",i));
-	at.set("egrad",i,0.5*(rel->y(4,i)*rel->y(4,i)-
-			      rel->y(5,i)*rel->y(5,i)-
-			      rel->y(6,i)*rel->y(6,i)));
+	at.set("egrad",i,0.5*(oy(i,3)*oy(i,3)-oy(i,4)*oy(i,4)-
+			      oy(i,5)*oy(i,5)));
 
 	at.set("esurf",i,at.get("ebulk",i)+at.get("egrad",i));
 	if (at.get("n",i)>0.0) {
@@ -782,10 +729,10 @@ public:
       
 	// There doesn't seem to be much difference between this approach
 	// and the one below
-	at.set("nprime",i,(kfn*(rp.n.nu*(-gw*rel->y(5,i)+gr/2.0*rel->y(6,i))+
-				mstar*gs*rel->y(4,i))+
-			   kfp*(rp.p.nu*(-gw*rel->y(5,i)-gr/2.0*rel->y(6,i))+
-				mstar*gs*rel->y(4,i)))/pi2);
+	at.set("nprime",i,(kfn*(rp.n.nu*(-gw*oy(i,4)+gr/2.0*oy(i,5))+
+				mstar*gs*oy(i,3))+
+			   kfp*(rp.p.nu*(-gw*oy(i,4)-gr/2.0*oy(i,5))+
+				mstar*gs*oy(i,3)))/pi2);
 	//if (i==0) rhoprime[i]=0;
 	//else rhoprime[i]=(rho[i]-rho[i-1])/(rel->x[i]-rel->x[i-1]);
 	
@@ -796,9 +743,9 @@ public:
 	  at.set("qpq",i,(rp.hb.ed-rp.mup*at.get("np",i)-
 			  rp.mun*at.get("nn",i))*4.0/at.get("nprime",i)/
 		 at.get("nprime",i));
-	  //qpq[i]=(rel->y(4,i)*rel->y(4,i)-
-	  // rel->y(5,i)*rel->y(5,i)-
-	  // rel->y(6,i)*rel->y(6,i))*2.0/at.get("nprime",i)/
+	  //qpq[i]=(oy(i,3)*oy(i,3)-
+	  // oy(i,4)*oy(i,4)-
+	  // oy(i,5)*oy(i,5))*2.0/at.get("nprime",i)/
 	  // at.get("nprime",i);
 	} else {
 	  at.set("qpq",i,0.0);
@@ -828,9 +775,9 @@ public:
 
       for(int i=1;i<=3;i++) {
 	xn[i]=lookup(ngrid,pow(kfn,3.0)/3.0/pi2/10.0*((double)(i*4-3)),
-		     rel->x,at.get_column("nn"));
+		     ox,at.get_column("nn"));
 	xp[i]=lookup(ngrid,pow(kfp,3.0)/3.0/pi2/10.0*((double)(i*4-3)),
-		     rel->x,at.get_column("np"));
+		     ox,at.get_column("np"));
       }
 
       cout << "Integrals." << endl;
@@ -867,7 +814,7 @@ public:
 	w02=surf2;
 	cout << "w0, w02: " << w0 << " " << w02 << endl;
       }
-
+      
 #ifdef NEVER_DEFINED
       
       //--------------------------------------------
@@ -948,201 +895,10 @@ public:
       
     }
 
-    delete rel;
-
     return 0;
-  }
-
-  int nucmat(size_t nv, const ubvector &ex, ubvector &ey) {
-    double f1,f2,f3,sig,ome,rho;
-    fermion &n=rp.n, &p=rp.p;
-
-    n.nu=ex[0];
-    p.nu=ex[1];
-    sig=ex[2];
-    ome=ex[3];
-    rho=ex[4];
-
-    rp.rmf_eos.calc_eq_p(n,p,sig,ome,rho,f1,f2,f3,rp.hb);
-
-    ey[0]=p.n+n.n-rp.nsat;
-    ey[1]=p.n-rp.nsat*rp.protfrac;
-    ey[2]=f1;
-    ey[3]=f2;
-    ey[4]=f3;
-
-    return 0;
-  }
-
-  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    double pleft, pright, munleft, munright;
-  
-    fermion &n=rp.n, &p=rp.p;
-    thermo &hb=rp.hb;
-
-    n.n=sx[0];
-    p.n=sx[1];
-    rp.rmf_eos.calc_e(n,p,hb);
-  
-    sy[0]=p.n-rp.protfrac*(p.n+n.n);
-    pleft=hb.pr;
-    munleft=n.mu;
-
-    n.n=sx[2];
-    p.n=0.001;
-    rp.rmf_eos.calc_e(n,p,hb);
-
-    pright=hb.pr;
-    munright=n.mu;
-
-    sy[1]=pleft-pright;
-    sy[2]=munleft-munright;
-
-    return 0;
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
-
-    double gw=rp.rmf_eos.cw*rp.rmf_eos.mw;
-    double gr=rp.rmf_eos.cr*rp.rmf_eos.mr;
-
-    double phi=y[0];
-    double v=y[1];
-    double r=y[2];
-    double phip=y[3];
-    double vp=y[4];
-    double rprime=y[5];
-    
-    rp.n.nu=rp.mun-gw*v+0.5*gr*r;
-    rp.p.nu=rp.mup-gw*v-0.5*gr*r;
-
-    double fn, fn2, fn3;
-    rp.rmf_eos.calc_eq_p(rp.n,rp.p,phi,v,r,fn,fn2,fn3,rp.hb);
-
-    if (ieq==0) {
-      return phip;
-    } else if (ieq==1) {
-      return vp;
-    } else if (ieq==2) {
-      return rprime;
-    } else if (ieq==3) {
-      return fn;
-    } else if (ieq==4) {
-      return fn2;
-    }
-    return fn3;
-    
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double left2(size_t ieq, double x, ubmatrix_row &y) {
-    if (ieq==0) {
-      return y[0]-rp.phi0;
-    }
-    if (ieq==1) {
-      return y[1]-rp.v0;
-    }
-    return y[2]-rp.r0;
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double right2(size_t ieq, double x, ubmatrix_row &y) {
-    if (ieq==0) return y[0];
-    if (ieq==1) return y[1];
-    return y[2];
   }
 
 };
-
-int s3relax::iter(int k, double err, double fac, ubvector_int &kmax,
-		  ubvector &ermax) {
-
-  cout << "Iter." << endl;
-  
-  ofstream itout;
-
-  if (rp->showrelax) {
-    if (k==1) {
-      cout << "\tIter.\tError\t\tFac.         Center       rhs" << endl;
-    }
-    if (k>=1 && k<=itmax) {
-      cout << "\t" << k << "  \t" << err << "  \t" << fac << " ";
-      //      cout << lookup(ngrid,y(1,1)/2.0,x,(*y)[1]) << " " 
-      cout << x[ngrid] << endl;
-    }
-  }
-
-  if (k>=itmax) {
-    cout << "Didn't converge. k: " << k << " itmax: " << itmax << endl;
-    rp->convergeflag=false;
-  } else {
-    rp->convergeflag=true;
-  }
-
-  if (err>rp->maxdev) {
-    cout << "Reached maxdev " << rp->maxdev << endl;
-    exit(-1);
-    rp->convergeflag=false;
-
-    for(int i=1;i<=ngrid;i++) {
-      x[i]=6.0*((double)(i-ngrid/2))/ngrid;
-      //      y[i]=rp->phi0;
-    }
-
-  }
-
-  return 0;
-}
-
-int s3relax::difeq(int k, int k1, int k2, int jsf, int is1, int isf) {
-
-  double phi, v, phip, vp, fn, fn2, dx, mstar;
-  double fn3, kfn, kfp;
-
-  if (k==k1) {
-    s(4,jsf)=y(1,1)-rp->phi0;
-    s(5,jsf)=y(2,1)-rp->v0;
-    s(6,jsf)=y(3,1)-rp->r0;
-
-  } else if (k>k2) {
-    s(1,jsf)=y(1,ngrid);
-    s(2,jsf)=y(2,ngrid);
-    s(3,jsf)=y(3,ngrid);
-
-  } else {
-    
-    double gw=rp->rmf_eos.cw*rp->rmf_eos.mw;
-    double gr=rp->rmf_eos.cr*rp->rmf_eos.mr;
-    
-    dx=x[k]-x[k-1];
-    phi=(y(1,k)+y(1,k-1))/2.0;
-    v=(y(2,k)+y(2,k-1))/2.0;
-    double r=(y(3,k)+y(3,k-1))/2.0;
-    phip=(y(4,k)+y(4,k-1))/2.0;
-    vp=(y(5,k)+y(5,k-1))/2.0;
-    double rprime=(y(6,k)+y(6,k-1))/2.0;
-    
-    rp->n.nu=rp->mun-gw*v+0.5*gr*r;
-    rp->p.nu=rp->mup-gw*v-0.5*gr*r;
-    
-    rp->rmf_eos.calc_eq_p(rp->n,rp->p,phi,v,r,fn,fn2,fn3,rp->hb);
-
-    s(1,jsf)=y(1,k)-y(1,k-1)-dx*phip;
-    s(2,jsf)=y(2,k)-y(2,k-1)-dx*vp;
-    s(3,jsf)=y(3,k)-y(3,k-1)-dx*rprime;
-    s(4,jsf)=y(4,k)-y(4,k-1)-dx*fn;
-    s(5,jsf)=y(5,k)-y(5,k-1)-dx*fn2;
-    s(6,jsf)=y(6,k)-y(6,k-1)-dx*fn3;
-
-  }
-
-  return 0;
-}
-
 
 int main(int argc, char *argv[]) {
   

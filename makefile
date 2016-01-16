@@ -18,7 +18,7 @@ rel.o: rel.cpp
 	$(CXX) $(FLAGS) -c rel.cpp
 
 rel: rel.o relax.o
-	$(CXX) $(FLAGS) -o rel rel.o relax.o $(LIBS)
+	$(CXX) $(FLAGS) -o rel rel.o $(LIBS)
 
 clean:
 	rm nr *.o
