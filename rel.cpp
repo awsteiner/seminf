@@ -332,7 +332,9 @@ public:
     s3relax *rel=new s3relax(ne,nb,ngrid);
     rel->rp=&rp;
     rel->itmax=100;
-
+    ubvector ox(ngrid);
+    ubmatrix oy(ngrid,rel->ne);
+    
     table<> at(1000);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
     at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
@@ -406,6 +408,15 @@ public:
       // Construct guess
       
       if (true) {
+
+	ox[0]=0.0;
+	oy(0,0)=rp.phi0;
+	oy(1,0)=rp.v0;
+	oy(2,0)=rp.r0;
+	oy(3,0)=-1.0e-3;
+	oy(4,0)=-4.0e-3;
+	if (fabs(protfrac-0.5)<0.0001) oy(5,0)=0.0;
+	else oy(5,0)=1.0e-4;
 	
 	rel->x[1]=0.0;
 	rel->y(1,1)=rp.phi0;
@@ -441,8 +452,37 @@ public:
 	      ilast=i-1;
 	      i=ngrid+10;
 	    }
+
 	  } else {
 	    for(int j=1;j<=6;j++) rel->y(j,i)=0.0;
+	  }
+	}
+
+	for(int i=1;i<ngrid;i++) {
+	  ox[i]=ox[i-1]+dx;
+
+	  if (guessdone==false) {
+	    rp.n.nu=rp.mun-gw*oy(1,i-1)+0.5*gr*oy(2,i-1);
+	    rp.p.nu=rp.mup-gw*oy(1,i-1)-0.5*gr*oy(2,i-1);
+	    
+	    rmf_eos.calc_eq_p(rp.n,rp.p,oy(0,i),oy(1,i-1),
+			      oy(2,i-1),fn,fn2,fn3,rp.hb);
+      
+	    oy(0,i)=oy(0,i-1)+dx*oy(3,i);
+	    oy(1,i)=oy(1,i-1)+dx*oy(4,i);
+	    oy(2,i)=oy(2,i-1)+dx*oy(5,i);
+	    oy(3,i)=oy(3,i-1)+dx*fn;
+	    oy(4,i)=oy(4,i-1)+dx*fn2;
+	    oy(5,i)=oy(5,i-1)+dx*fn3;
+
+	    if (oy(0,i)<0.0 || oy(1,i)<0.0) {
+	      guessdone=true;
+	      ilast=i;
+	      i=ngrid+10;
+	    }
+
+	  } else {
+	    for(int j=0;j<6;j++) oy(j-1,i)=0.0;
 	  }
 	}
 
@@ -468,6 +508,23 @@ public:
 	    for(int j=4;j<=6;j++) rel->y(j,i)=0.0;
 	  }
 	}
+
+	for(int i=ngrid-1;i>=0;i--) {
+	  interp=(int)(((double)i)/((double)ngrid)*((double)ilast));
+	  xinterp=dx*((double)i)/((double)ngrid)*((double)ilast);
+	  ox[i]=xinterp;
+	  if (i>9) {
+	    for(int j=0;j<6;j++) {
+	      oy(j,i)=oy(j,interp)+(xinterp-ox[interp])/dx*
+		(oy(j,interp+1)-oy(j,interp));
+	    }
+	  } else {
+	    oy(0,i)=rp.phi0;
+	    oy(1,i)=rp.v0;
+	    oy(2,i)=rp.r0;
+	    for(int j=3;j<6;j++) oy(j,i)=0.0;
+	  }
+	}
       }
 
       //----------------------------------------------
@@ -479,13 +536,29 @@ public:
 	rel->x[i]-=xcent;
       }
 
-      if (debug) {
+      if (true || debug) {
 	for(int i=1;i<=ngrid;i+=ngrid/70) {
 	  cout.width(3);
 	  cout << i << " ";
 	  cout.setf(ios::showpos);
 	  cout << rel->x[i] << " " << rel->y(1,i) << " " << rel->y(2,i)
 	       << " " << rel->y(3,i) << endl;
+	  cout.unsetf(ios::showpos);
+	}
+      }
+
+      xcent=ox[ngrid/2];
+      for(int i=1;i<=ngrid;i++) {
+	ox[i]-=xcent;
+      }
+
+      if (true || debug) {
+	for(int i=0;i<ngrid;i+=ngrid/70) {
+	  cout.width(3);
+	  cout << i << " ";
+	  cout.setf(ios::showpos);
+	  cout << ox[i] << " " << oy(1,i) << " " << oy(2,i)
+	       << " " << oy(3,i) << endl;
 	  cout.unsetf(ios::showpos);
 	}
       }
@@ -510,8 +583,6 @@ public:
 	// Try ode_it_solve
 	
 	if (true) {
-	  ubvector ox(ngrid);
-	  ubmatrix oy(ngrid,rel->ne);
 	  for(int i=1;i<=ngrid;i++) {
 	    ox[i-1]=rel->x[i];
 	    for(int j=1;j<=rel->ne;j++) {
@@ -610,8 +681,6 @@ public:
       } else {
 	cout << "Going to final solution." << endl;
 	if (true) {
-	  ubvector ox(ngrid);
-	  ubmatrix oy(ngrid,rel->ne);
 	  for(int i=1;i<=ngrid;i++) {
 	    ox[i-1]=rel->x[i];
 	    for(int j=1;j<=rel->ne;j++) {
@@ -791,9 +860,12 @@ public:
 		     at.get_column("wd2int"));
 	
 	sssv1=4.0*pi*r0*r0*wd/hns;
+
+	cout << "wd, wd2, sssv1: " << wd << " " << wd2 << " " << sssv1 << endl;
       } else {
 	w0=surf;
 	w02=surf2;
+	cout << "w0, w02: " << w0 << " " << w02 << endl;
       }
 
 #ifdef NEVER_DEFINED
