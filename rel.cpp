@@ -18,14 +18,6 @@
 
   -------------------------------------------------------------------
 */
-/*
-  \note Initial guess reading might be broken
-  
-  \note wd2int() is broken since fesym() tends to 
-  fail at low densities. This is ok, however, since wd(drop2) is
-  not used in any of the figures.
-*/
-
 #include <cmath>
 #include <iostream>
 #include <functional>
@@ -45,115 +37,37 @@
 #include <o2scl/mroot_hybrids.h>
 #include <o2scl/mm_funct.h>
 #include <o2scl/interp.h>
-#include <o2scl/ode_it_solve.h>
+
+#include "seminf.h"
 
 using namespace std;
 using namespace o2scl;
 using namespace o2scl_hdf;
 using namespace o2scl_const;
 
-typedef boost::numeric::ublas::vector<double> ubvector;
-typedef boost::numeric::ublas::matrix<double> ubmatrix;
-typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
+/** \brief Semi-infinite nuclear matter for relativistic mean-field
+    models in the Thomas-Fermi approximation
 
-/** \brief Desc
- */
-class ode_it_solve2 :
-  public ode_it_solve<ode_it_funct11,ubvector,ubmatrix,ubmatrix_row,
-		      ubvector,ubmatrix> {
+    In the semi-infinite nuclear matter approximation, the 
+    meson field equations are
+    \f{eqnarray*}
+    \frac{d^2 \sigma}{d z^2} &=& 
+    m_{\sigma}^2 \sigma - g_{\sigma} \left( n_{s n} + n_{s p} \right)
+    + b M g_{\sigma}^3 \sigma^2 + c g_{\sigma}^4 \sigma^3 -
+    g_{\rho}^2 \rho^2 \frac{\partial f}{\partial \sigma} \nonumber \\
+    \frac{d^2 \omega}{d z^2} &=&
+    m_{\omega}^2 \omega - g_{\omega} \left(n_n+n_p\right)
+    + \frac{\zeta}{6} g_{\omega}^4 \omega^3 + g_{\rho}^2 \rho^2 
+    \frac{\partial f}{\partial \omega} \nonumber \\
+    \frac{d^2 \rho}{d z^2} &=&
+    m_{\rho}^2 \rho + \frac{1}{2} g_{\rho} \left(n_n-n_p\right)
+    + 2 g_{\rho}^2 \rho f + \frac{\xi}{6} g_{\rho}^4 \rho^3
+    \f}
+    in the same notation as \ref o2scl::eos_had_rmf .
 
-protected:
-  
-  /** \brief Desc
-   */
-  double eps;
-  
-public:
-  
-  /** \brief Desc
-   */
-  ode_it_solve2() : ode_it_solve<ode_it_funct11,ubvector,ubmatrix,
-				 ubmatrix_row,ubvector,ubmatrix>() {
-    eps=1.0e-9;
-  }
-  
-protected:
-  
-  /** \brief Compute the derivatives of the LHS boundary conditions
-
-      This function computes \f$ \partial f_{left,\mathrm{ieq}} /
-      \partial y_{\mathrm{ivar}} \f$
-  */
-  virtual double fd_left(size_t ieq, size_t ivar, double x,
-			 ubmatrix_row &y) {
-    
-    double ret, dydx;
-    
-    h=eps*fabs(y[ivar]);
-    if (fabs(h)<1.e-15) h=eps;
-    
-    y[ivar]+=h;
-    ret=(*fl)(ieq,x,y);
-    
-    y[ivar]-=h;
-    ret-=(*fl)(ieq,x,y);
-    
-    ret/=h;
-    return ret;
-  }
-  
-  /** \brief Compute the derivatives of the RHS boundary conditions
-	
-      This function computes \f$ \partial f_{right,\mathrm{ieq}} /
-      \partial y_{\mathrm{ivar}} \f$
-  */
-  virtual double fd_right(size_t ieq, size_t ivar, double x,
-			  ubmatrix_row &y) {
-
-    double ret, dydx;
-    
-    h=eps*fabs(y[ivar]);
-    if (fabs(h)<1.e-15) h=eps;
-
-    y[ivar]+=h;
-    ret=(*fr)(ieq,x,y);
-    
-    y[ivar]-=h;
-    ret-=(*fr)(ieq,x,y);
-    
-    ret/=h;
-    return ret;
-  }
-  
-  /** \brief Compute the finite-differenced part of the 
-      differential equations
-
-      This function computes \f$ \partial f_{\mathrm{ieq}} / \partial
-      y_{\mathrm{ivar}} \f$
-  */
-  virtual double fd_derivs(size_t ieq, size_t ivar, double x,
-			   ubmatrix_row &y) {
-
-    double ret, dydx;
-    
-    h=eps*fabs(y[ivar]);
-    if (fabs(h)<1.e-15) h=eps;
-
-    y[ivar]+=h;
-    ret=(*fd)(ieq,x,y);
-    
-    y[ivar]-=h;
-    ret-=(*fd)(ieq,x,y);
-    
-    ret/=h;
-    
-    return ret;
-  }
-
-};
-
-/** \brief Desc
- */
+    \note wd2int() is broken since fesym() tends to fail at low
+    densities. For this reason, it wasn't used in \ref Steiner05ia .
+*/
 class seminf_rel {
 
 protected:
@@ -161,7 +75,12 @@ protected:
   /** \brief The grid size
    */
   int ngrid;
+  /** \brief The saturation density at the current proton
+      fraction
+  */
   double nsat;
+  /** \brief The current proton fraction
+   */
   double protfrac;
   /** \brief The current neutron chemical potential
    */
@@ -169,9 +88,12 @@ protected:
   /** \brief The current proton chemical potential
    */
   double mup;
-  double phi0;
-  double v0;
-  double r0;
+  /// \name The meson fields at the LHS
+  //@{
+  double sigma_left;
+  double omega_left;
+  double rho_left;
+  //@}
   /** \brief The hadronic EOS
    */
   eos_had_rmf rmf_eos;
@@ -188,15 +110,18 @@ protected:
    */
   fermion proton;
   
-  /** \brief Desc
+  /** \brief Equations for the boundary conditions in 
+      the case of a neutron drip
    */
   int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
     double pleft, pright, munleft, munright;
-  
+
     neutron.n=sx[0];
     proton.n=sx[1];
     rmf_eos.calc_e(neutron,proton,hb);
-  
+
+    // Ensure the proton fraction on the LHS matches
+    // the value in protfrac
     sy[0]=proton.n-protfrac*(proton.n+neutron.n);
     pleft=hb.pr;
     munleft=neutron.mu;
@@ -208,6 +133,8 @@ protected:
     pright=hb.pr;
     munright=neutron.mu;
 
+    // Ensure the pressures and neutron chemical potentials
+    // on the LHS and RHS match
     sy[1]=pleft-pright;
     sy[2]=munleft-munright;
 
@@ -236,9 +163,9 @@ protected:
   /** \brief LHS boundary conditions
    */
   double left(size_t ieq, double x, ubmatrix_row &y) {
-    if (ieq==0) return y[0]-phi0;
-    if (ieq==1) return y[1]-v0;
-    return y[2]-r0;
+    if (ieq==0) return y[0]-sigma_left;
+    if (ieq==1) return y[1]-omega_left;
+    return y[2]-rho_left;
   }
 
   /** \brief RHS boundary conditions
@@ -385,7 +312,7 @@ public:
       neutron.n=nsat*(1.0-protfrac);
       proton.n=nsat*protfrac;
       rmf_eos.calc_e(neutron,proton,tht);
-      rmf_eos.get_fields(phi0,v0,r0);
+      rmf_eos.get_fields(sigma_left,omega_left,rho_left);
       mun=neutron.mu;
       mup=proton.mu;
       
@@ -414,8 +341,9 @@ public:
       }
 
       if (debug) {
-	cout << "phi0: " << phi0 << "  v0: " << v0 << " r0: "
-	     << r0 << endl;
+	cout << "sigma_left: " << sigma_left
+	     << "  omega_left: " << omega_left
+	     << " rho_left: " << rho_left << endl;
 	cout << " mun: " << mun << " mup: " << mup << endl;
 	cout << endl;
       }
@@ -426,9 +354,9 @@ public:
 	// Construct LHS for initial guess
       
 	ox[0]=0.0;
-	oy(0,0)=phi0;
-	oy(0,1)=v0;
-	oy(0,2)=r0;
+	oy(0,0)=sigma_left;
+	oy(0,1)=omega_left;
+	oy(0,2)=rho_left;
 	oy(0,3)=-1.0e-3;
 	oy(0,4)=-1.0e-3;
 	if (fabs(protfrac-0.5)<0.0001) oy(0,5)=0.0;
@@ -485,9 +413,9 @@ public:
 		(oy(interp+1,j)-oy(interp,j));
 	    }
 	  } else {
-	    oy(i,0)=phi0;
-	    oy(i,1)=v0;
-	    oy(i,2)=r0;
+	    oy(i,0)=sigma_left;
+	    oy(i,1)=omega_left;
+	    oy(i,2)=rho_left;
 	    for(int j=3;j<6;j++) oy(i,j)=0.0;
 	  }
 	}

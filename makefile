@@ -5,14 +5,11 @@ LIBS = -L$(GSL_LIB) -L$(O2SCL_LIB) -L$(HDF5_LIB) \
 	-lo2scl_eos -lo2scl_part -lo2scl_hdf -lo2scl -lhdf5 -lhdf5_hl \
 	-lreadline -lgsl -lgslcblas -lm
 
-relax.o: relax.cpp relax.h
-	$(CXX) $(FLAGS) -c relax.cpp
-
 nr.o: nr.cpp
 	$(CXX) $(FLAGS) -c nr.cpp
 
-nr: nr.o relax.o
-	$(CXX) $(FLAGS) -o nr nr.o relax.o $(LIBS)
+nr: nr.o
+	$(CXX) $(FLAGS) -o nr nr.o $(LIBS)
 
 rel.o: rel.cpp
 	$(CXX) $(FLAGS) -c rel.cpp
@@ -21,7 +18,7 @@ rel: rel.o
 	$(CXX) $(FLAGS) -o rel rel.o $(LIBS)
 
 clean:
-	rm nr *.o
+	rm nr *.o rel
 
 doc: empty
 	git rev-parse HEAD | awk \

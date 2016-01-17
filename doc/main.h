@@ -15,9 +15,10 @@
     <a href="http://www.gnu.org/software/gsl">GSL</a>,
     <a href="http://www.boost.org">Boost</a>,
     <a href="http://www.hdfgroup.org/HDF5/">HDF5</a>.
-
-    The code appears to work marginally for Skyrme model NRAPR and RMF
-    model RAPR, but still needs quite a bit of work.
+    
+    The code appears to work marginally for Skyrme model NRAPR (see
+    \ref seminf_nr) and RMF model RAPR (see \ref seminf_rel), but
+    still needs quite a bit of work.
     
     Originally written for \ref Steiner05ia .
     
