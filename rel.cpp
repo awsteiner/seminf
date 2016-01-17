@@ -190,28 +190,6 @@ protected:
   
   /** \brief Desc
    */
-  int nucmat(size_t nv, const ubvector &ex, ubvector &ey) {
-    double f1, f2, f3, sig, ome, rho;
-
-    neutron.nu=ex[0];
-    proton.nu=ex[1];
-    sig=ex[2];
-    ome=ex[3];
-    rho=ex[4];
-    
-    rmf_eos.calc_eq_p(neutron,proton,sig,ome,rho,f1,f2,f3,hb);
-
-    ey[0]=proton.n+neutron.n-nsat;
-    ey[1]=proton.n-nsat*protfrac;
-    ey[2]=f1;
-    ey[3]=f2;
-    ey[4]=f3;
-
-    return 0;
-  }
-
-  /** \brief Desc
-   */
   int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
     double pleft, pright, munleft, munright;
   
@@ -238,75 +216,39 @@ protected:
 
   /** \brief Differential equations to solve
    */
-  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
-
-    double gw=rmf_eos.cw*rmf_eos.mw;
-    double gr=rmf_eos.cr*rmf_eos.mr;
-
-    double phi=y[0];
-    double v=y[1];
-    double r=y[2];
-    double phip=y[3];
-    double vp=y[4];
-    double rprime=y[5];
+  double difeq(size_t ieq, double x, ubmatrix_row &y) {
     
-    neutron.nu=mun-gw*v+0.5*gr*r;
-    proton.nu=mup-gw*v-0.5*gr*r;
+    neutron.mu=mun;
+    proton.mu=mup;
 
     double fn, fn2, fn3;
-    rmf_eos.calc_eq_p(neutron,proton,phi,v,r,fn,fn2,fn3,hb);
+    rmf_eos.calc_eq_p(neutron,proton,y[0],y[1],y[2],fn,fn2,fn3,hb);
 
-    if (ieq==0) {
-      return phip;
-    } else if (ieq==1) {
-      return vp;
-    } else if (ieq==2) {
-      return rprime;
-    } else if (ieq==3) {
-      return fn;
-    } else if (ieq==4) {
-      return fn2;
-    }
+    if (ieq==0) return y[3];
+    else if (ieq==1) return y[4];
+    else if (ieq==2) return y[5];
+    else if (ieq==3) return fn;
+    else if (ieq==4) return fn2;
     return fn3;
     
   }
 
   /** \brief LHS boundary conditions
    */
-  double left2(size_t ieq, double x, ubmatrix_row &y) {
-    if (ieq==0) {
-      return y[0]-phi0;
-    }
-    if (ieq==1) {
-      return y[1]-v0;
-    }
+  double left(size_t ieq, double x, ubmatrix_row &y) {
+    if (ieq==0) return y[0]-phi0;
+    if (ieq==1) return y[1]-v0;
     return y[2]-r0;
   }
 
   /** \brief RHS boundary conditions
    */
-  double right2(size_t ieq, double x, ubmatrix_row &y) {
+  double right(size_t ieq, double x, ubmatrix_row &y) {
     if (ieq==0) return y[0];
     if (ieq==1) return y[1];
     return y[2];
   }
   
-  /** \brief Desc
-   */
-  template<class vec_t, class vec2_t> 
-  double lookup(int n, double yy0, const vec_t &x,
-		const vec2_t &y) {
-
-    for(int i=2;i<=n;i++) {
-      if ((y[i]>=yy0 && y[i-1]<yy0) || (y[i]<yy0 && y[i-1]>=yy0)) {
-	double x0=x[i-1]+(x[i]-x[i-1])*(yy0-y[i-1])/(y[i]-y[i-1]);
-	return x0;
-      }
-    }
-
-    return 0.0;
-  }
-
 public:
 
   seminf_rel() {
@@ -325,13 +267,7 @@ public:
     bool debug=true;
     double conve=1.0e-10;
     double protfrac=0.0;
-    double xn[4];
-    double xp[4];
     double fact=1.04;
-    double gs;
-    double gw;
-    double gr;
-    double mstar;
     double kfn;
     double kfp;
     double finalconverge=1.0e-12;
@@ -358,12 +294,11 @@ public:
     double surf2;
     double sbulk;
     double sgrad;
+    double xn[3];
+    double xp[3];
     
     double temp;
     double nint;
-    double f1;
-    double f2;
-    double f3;
     double dx=7.0/((double)ngrid);
     double xinterp;
     int ilast=0;
@@ -389,20 +324,20 @@ public:
     proton.non_interacting=false;
     
     //--------------------------------------------
-    // Initializations for ODE solver class
+    // Initializations for ODE solver
     
     ode_it_solve2 oit;
     ode_it_funct11 f_derivs=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_rel::difeq2),this,std::placeholders::_1,
+       (&seminf_rel::difeq),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);       
     ode_it_funct11 f_left=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_rel::left2),this,std::placeholders::_1,
+       (&seminf_rel::left),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);       
     ode_it_funct11 f_right=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_rel::right2),this,std::placeholders::_1,
+       (&seminf_rel::right),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);   
     ubvector ox(ngrid);
     ubmatrix oy(ngrid,ne);
@@ -413,12 +348,11 @@ public:
     
     //--------------------------------------------
     // Create output table
-
-    table<> at(1000);
+    
+    table<> at(ngrid);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
     at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
 		     "egrad thickint wdint wd2int qpq ");
-    at.set_nlines(ngrid);
   
     //--------------------------------------------
     // Main loop over requested proton fractions
@@ -431,28 +365,32 @@ public:
 	protfrac=0.49;
       }
 
-      //--------------------------------------------
+      //-----------------------------------------------------------
       // Now calculate for saturation nuclear matter with proton
-      // fraction given in parameter file 
-  
-      protfrac=protfrac;
+      // fraction given in parameter file
+      
       double eoatemp;
       rmf_eos.set_n_and_p(neutron,proton);
       rmf_eos.set_thermo(tht);
-    
+      
+      // Compute the saturation density for this proton fraction
       nsat=rmf_eos.fn0(1.0-2.0*protfrac,eoatemp);
-      rmf_eos.get_fields(phi0,v0,r0);
-    
       cout << "Saturation density at x=" << protfrac << ": "
 	   << nsat << endl;
 
-      double rad0=0.0;
-      if (pf_index==1) rad0=cbrt(0.75/pi/nsat);
-    
-      mun=neutron.mu;
-      mup=proton.mu;
+      // Compute the meson fields and chemical potentials at this
+      // density
       double nn_left=neutron.n;
       double np_left=proton.n;
+      neutron.n=nsat*(1.0-protfrac);
+      proton.n=nsat*protfrac;
+      rmf_eos.calc_e(neutron,proton,tht);
+      rmf_eos.get_fields(phi0,v0,r0);
+      mun=neutron.mu;
+      mup=proton.mu;
+      
+      // The nuclear radius parameter at this saturation density
+      double rad0=cbrt(0.75/pi/nsat);
 
       // Neutron drip case. Not working.
       if (mun>neutron.m) {
@@ -482,90 +420,108 @@ public:
 	cout << endl;
       }
 
-      gs=rmf_eos.cs*rmf_eos.ms;
-      gw=rmf_eos.cw*rmf_eos.mw;
-      gr=rmf_eos.cr*rmf_eos.mr;
-  
-      //----------------------------------------------
-      // Construct LHS for initial guess
+      if (true) {
       
-      ox[0]=0.0;
-      oy(0,0)=phi0;
-      oy(0,1)=v0;
-      oy(0,2)=r0;
-      oy(0,3)=-1.0e-3;
-      oy(0,4)=-1.0e-3;
-      if (fabs(protfrac-0.5)<0.0001) oy(0,5)=0.0;
-      else oy(0,5)=1.0e-4;
-	
-      //----------------------------------------------
-      // Integrate to determine initial guess
-
-      neutron.mu=mun;
-      proton.mu=mup;
-      neutron.n=0.08;
-      proton.n=0.08;
-
-      bool guessdone=false;
-      for(int i=1;i<ngrid;i++) {
-	ox[i]=ox[i-1]+dx;
-
-	if (guessdone==false) {
-	  neutron.nu=mun-gw*oy(i-1,1)+0.5*gr*oy(i-1,2);
-	  proton.nu=mup-gw*oy(i-1,1)-0.5*gr*oy(i-1,2);
-	    
-	  neutron.mu=mun;
-	  proton.mu=mup;
-	  rmf_eos.calc_eq_p(neutron,proton,oy(i-1,0),oy(i-1,1),
-			    oy(i-1,2),f1,f2,f3,hb);
+	//----------------------------------------------
+	// Construct LHS for initial guess
       
-	  oy(i,0)=oy(i-1,0)+dx*oy(i-1,3);
-	  oy(i,1)=oy(i-1,1)+dx*oy(i-1,4);
-	  oy(i,2)=oy(i-1,2)+dx*oy(i-1,5);
-	  oy(i,3)=oy(i-1,3)+dx*f1;
-	  oy(i,4)=oy(i-1,4)+dx*f2;
-	  oy(i,5)=oy(i-1,5)+dx*f3;
-
-	  if (oy(i,0)<0.0 || oy(i,1)<0.0) {
-	    guessdone=true;
-	    ilast=i;
-	    i=ngrid+10;
-	  }
-	} else {
-	  for(int j=0;j<6;j++) oy(i,j)=0.0;
-	}
-      }
-
-      //--------------------------------------------------------------
-      // Stretch the solution over the entire grid. Start at the RHS,
-      // so that we can overwrite the original data. This works until
-      // we get to the left hand side, where we adjust accordingly
+	ox[0]=0.0;
+	oy(0,0)=phi0;
+	oy(0,1)=v0;
+	oy(0,2)=r0;
+	oy(0,3)=-1.0e-3;
+	oy(0,4)=-1.0e-3;
+	if (fabs(protfrac-0.5)<0.0001) oy(0,5)=0.0;
+	else oy(0,5)=1.0e-4;
 	
-      ilast=18;
-      for(int i=ngrid-1;i>=0;i--) {
-	interp=(int)(((double)(i+1))/((double)ngrid)*((double)(ilast+1)))-1;
-	xinterp=dx*((double)(i+1))/((double)ngrid)*((double)(ilast+1));
-	ox[i]=xinterp;
-	if (i>9) {
-	  for(int j=0;j<6;j++) {
-	    oy(i,j)=oy(interp,j)+(xinterp-ox[interp])/dx*
-	      (oy(interp+1,j)-oy(interp,j));
+	//----------------------------------------------
+	// Integrate to determine initial guess
+
+	neutron.mu=mun;
+	proton.mu=mup;
+	neutron.n=0.08;
+	proton.n=0.08;
+
+	bool guessdone=false;
+	for(int i=1;i<ngrid;i++) {
+	  ox[i]=ox[i-1]+dx;
+	
+	  if (guessdone==false) {
+
+	    double f1, f2, f3;
+	    rmf_eos.calc_eq_p(neutron,proton,oy(i-1,0),oy(i-1,1),
+			      oy(i-1,2),f1,f2,f3,hb);
+      
+	    oy(i,0)=oy(i-1,0)+dx*oy(i-1,3);
+	    oy(i,1)=oy(i-1,1)+dx*oy(i-1,4);
+	    oy(i,2)=oy(i-1,2)+dx*oy(i-1,5);
+	    oy(i,3)=oy(i-1,3)+dx*f1;
+	    oy(i,4)=oy(i-1,4)+dx*f2;
+	    oy(i,5)=oy(i-1,5)+dx*f3;
+
+	    if (oy(i,0)<0.0 || oy(i,1)<0.0) {
+	      guessdone=true;
+	      ilast=i;
+	      i=ngrid+10;
+	    }
+	  } else {
+	    for(int j=0;j<6;j++) oy(i,j)=0.0;
 	  }
-	} else {
-	  oy(i,0)=phi0;
-	  oy(i,1)=v0;
-	  oy(i,2)=r0;
-	  for(int j=3;j<6;j++) oy(i,j)=0.0;
 	}
-      }
 
-      //----------------------------------------------
-      // Now we center the x-axis on zero, which makes it
-      // easier to expand the grid later
+	//--------------------------------------------------------------
+	// Stretch the solution over the entire grid. Start at the RHS,
+	// so that we can overwrite the original data. This works until
+	// we get to the left hand side, where we adjust accordingly
+	
+	ilast=18;
+	for(int i=ngrid-1;i>=0;i--) {
+	  interp=(int)(((double)(i+1))/((double)ngrid)*((double)(ilast+1)))-1;
+	  xinterp=dx*((double)(i+1))/((double)ngrid)*((double)(ilast+1));
+	  ox[i]=xinterp;
+	  if (i>9) {
+	    for(int j=0;j<6;j++) {
+	      oy(i,j)=oy(interp,j)+(xinterp-ox[interp])/dx*
+		(oy(interp+1,j)-oy(interp,j));
+	    }
+	  } else {
+	    oy(i,0)=phi0;
+	    oy(i,1)=v0;
+	    oy(i,2)=r0;
+	    for(int j=3;j<6;j++) oy(i,j)=0.0;
+	  }
+	}
 
-      xcent=ox[ngrid/2-1];
-      for(int i=0;i<ngrid;i++) {
-	ox[i]-=xcent;
+	//----------------------------------------------
+	// Now we center the x-axis on zero, which makes it
+	// easier to expand the grid later
+
+	xcent=ox[ngrid/2-1];
+	for(int i=0;i<ngrid;i++) {
+	  ox[i]-=xcent;
+	}
+
+	// End of calculation of initial guess
+      } else {
+
+	// Load initial guess from file
+	hdf_file hf;
+	hf.open("rel.o2");
+	string tname;
+	if (pf_index==1) tname="rel1";
+	else tname="rel2";
+	hdf_input(hf,at,tname);
+	hf.close();
+	for(int i=0;i<ngrid;i++) {
+	  ox[i]=at.get("x",i);
+	  oy(i,0)=at.get("sigma",i);
+	  oy(i,1)=at.get("omega",i);
+	  oy(i,2)=at.get("rho",i);
+	  oy(i,3)=at.get("sigmap",i);
+	  oy(i,4)=at.get("omegap",i);
+	  oy(i,5)=at.get("rhop",i);
+	}
+
       }
 
       convergeflag=true;
@@ -644,7 +600,7 @@ public:
       }
 
       //--------------------------------------------
-      // Output characteristics of final solution
+      // Store final solution to table
 
       for(int i=0;i<ngrid;i++) {
 	at.set("x",i,ox[i]);
@@ -659,80 +615,65 @@ public:
       //--------------------------------------------
       // Calculate rhon, rhop, energy, and ebulk at
       // every point in profile
-    
-      double hns=rmf_eos.fesym(nsat,protfrac);
+      
       double delta=1.0-2.0*protfrac;
-    
-      for(int i=0;i<ngrid;i++) {
-	mstar=rmf_eos.mnuc-gs*oy(i,0);
-    
-	if (mun-gw*oy(i,1)+gr*oy(i,2)/2.0<mstar) {
-	  kfn=0.0;
-	} else {
-	  kfn=sqrt(pow(mun-gw*oy(i,1)+gr*oy(i,2)/2.0,2.0)-
-		   mstar*mstar);
-	}
-	if (mup-gw*oy(i,1)-gr*oy(i,2)/2.0<mstar) {
-	  kfp=0.0;
-	} else {
-	  kfp=sqrt(pow(mup-gw*oy(i,1)-gr*oy(i,2)/2.0,2.0)-
-		   mstar*mstar);
-	}
+      double hns=rmf_eos.fesym(nsat,delta);
 
-	at.set("nn",i,pow(kfn,3.0)/3.0/pi2);
-	at.set("np",i,pow(kfp,3.0)/3.0/pi2);
+      neutron.mu=mun;
+      proton.mu=mup;
+
+      for(int i=0;i<ngrid;i++) {
+
+	double f1, f2, f3;
+	rmf_eos.calc_eq_p(neutron,proton,oy(i,0),oy(i,1),
+			  oy(i,2),f1,f2,f3,hb);
+
+	at.set("nn",i,neutron.n);
+	at.set("np",i,proton.n);
 	at.set("n",i,at.get("nn",i)+at.get("np",i));
 	at.set("alpha",i,at.get("nn",i)-at.get("np",i));
 
-	neutron.ms=mstar;
-	proton.ms=mstar;
-	neutron.nu=sqrt(kfn*kfn+neutron.ms*neutron.ms);
-	proton.nu=sqrt(kfp*kfp+proton.ms*proton.ms);
-	rmf_eos.calc_eq_p(neutron,proton,oy(i,0),oy(i,1),
-			  oy(i,2),f1,f2,f3,hb);
-	hb.ed=-hb.pr+neutron.n*neutron.mu+proton.n*proton.mu;
-
-	at.set("ebulk",i,hb.ed-mup*at.get("np",i)-
-	       mun*at.get("nn",i));
+	at.set("ebulk",i,hb.ed-mup*at.get("np",i)-mun*at.get("nn",i));
 	at.set("egrad",i,0.5*(oy(i,3)*oy(i,3)-oy(i,4)*oy(i,4)-
 			      oy(i,5)*oy(i,5)));
-
+	
 	at.set("esurf",i,at.get("ebulk",i)+at.get("egrad",i));
 	if (at.get("n",i)>0.0) {
 	  at.set("esurf2",i,at.get("esurf",i));
 	} else {
 	  at.set("esurf2",i,0.0);
 	}
-      
-	// There doesn't seem to be much difference between this approach
-	// and the one below
-	at.set("nprime",i,(kfn*(neutron.nu*(-gw*oy(i,4)+gr/2.0*oy(i,5))+
-				mstar*gs*oy(i,3))+
-			   kfp*(proton.nu*(-gw*oy(i,4)-gr/2.0*oy(i,5))+
-				mstar*gs*oy(i,3)))/pi2);
-	//if (i==0) rhoprime[i]=0;
-	//else rhoprime[i]=(rho[i]-rho[i-1])/(rel->x[i]-rel->x[i-1]);
+      }
+
+      at.delete_column("nprime");
+      at.deriv("x","n","nprime");
+
+      for(int i=0;i<ngrid;i++) {
 	
 	if (at.get("nprime",i)!=0.0) {
-	  // Here qpq=Q_nn+Q_np is calculated from the bulk energy. One
-	  // Could calculate this from the gradient part of the surface
-	  // energy as well. There is not much difference.
+
+	  // Here qpq=Q_nn+Q_np is calculated from the bulk energy.
+	  // One could calculate this from the gradient part of the
+	  // surface energy as well. There is not much difference.
+	  
 	  at.set("qpq",i,(hb.ed-mup*at.get("np",i)-
 			  mun*at.get("nn",i))*4.0/at.get("nprime",i)/
 		 at.get("nprime",i));
+	  
 	  //qpq[i]=(oy(i,3)*oy(i,3)-
 	  // oy(i,4)*oy(i,4)-
 	  // oy(i,5)*oy(i,5))*2.0/at.get("nprime",i)/
 	  // at.get("nprime",i);
+	  
 	} else {
 	  at.set("qpq",i,0.0);
 	}
-
+	
 	at.set("thickint",i,(at.get("nn",i)/nn_left-at.get("np",i)/np_left));
-      
+	
 	if (pf_index>=2) {
 	  at.set("wdint",i,at.get("alpha",i)/delta-at.get("n",i));
-	  if (at.get("n",i)<0.0) {
+	  if (at.get("n",i)>0.0) {
 	    at.set("wd2int",i,at.get("n",i)*
 		   (pow(at.get("alpha",i)/delta/at.get("n",i),2.0)*
 		    rmf_eos.fesym(at.get("n",i))-hns));
@@ -742,56 +683,57 @@ public:
 	}
       }
     
-      //--------------------------------------------
-      // Calculate the value of x for nn*0.9, nn*0.5, 
-      // nn*0.1, etc.
-
-      mstar=rmf_eos.mnuc-gs*phi0;
-      kfn=sqrt(pow(mun-gw*v0+gr*r0/2.0,2.0)-mstar*mstar);
-      kfp=sqrt(pow(mup-gw*v0-gr*r0/2.0,2.0)-mstar*mstar);
-
-      for(int i=1;i<=3;i++) {
-	xn[i]=lookup(ngrid,pow(kfn,3.0)/3.0/pi2/10.0*((double)(i*4-3)),
-		     ox,at.get_column("nn"));
-	xp[i]=lookup(ngrid,pow(kfp,3.0)/3.0/pi2/10.0*((double)(i*4-3)),
-		     ox,at.get_column("np"));
+      //----------------------------------------------------------
+      // Calculate the value of x for nn*0.9, nn*0.5, nn*0.1, etc.
+      
+      o2scl::interp<std::vector<double>,ubvector> it(itp_linear);
+      
+      for(int i=0;i<3;i++) {
+	xn[i]=it.eval(nn_left/10.0*((double)(i*4+1)),ngrid,
+		      at.get_column("nn"),ox);
+	xp[i]=it.eval(np_left/10.0*((double)(i*4+1)),ngrid,
+		      at.get_column("np"),ox);
       }
 
-      cout << "Integrals." << endl;
-      o2scl::interp<std::vector<double>,std::vector<double> > gi;
+      //----------------------------------------------------------
+      // Integrals
+      
+      o2scl::interp<std::vector<double>,std::vector<double> > it2;
 
-      const std::vector<double> &xav=at[0];
+      const std::vector<double> &x_vec=at.get_column("x");
+      double x_left=x_vec[0];
+      double x_right=x_vec[at.get_nlines()-1];
       size_t istt=at.get_nlines()-1;
 
-      surf=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("esurf"));
-      surf2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		     at.get_column("esurf2"));
-      sbulk=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		     at.get_column("ebulk"));
-      sgrad=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		     at.get_column("egrad"));
-      thick=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		     at.get_column("thickint"));
-
+      surf=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		     at.get_column("esurf"));
+      surf2=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		      at.get_column("esurf2"));
+      sbulk=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		      at.get_column("ebulk"));
+      sgrad=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		      at.get_column("egrad"));
+      thick=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		      at.get_column("thickint"));
+      
       if (pf_index>=2) {
-
-	wd=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		    at.get_column("wdint"));
+	
+	wd=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		     at.get_column("wdint"));
 	wd*=hns;
-
-	wd2=gi.integ(xav[0],xav[istt],at.get_nlines(),at.get_column("x"),
-		     at.get_column("wd2int"));
+	
+	wd2=it2.integ(x_left,x_right,at.get_nlines(),x_vec,
+		      at.get_column("wd2int"));
 	
 	sssv1=4.0*pi*rad0*rad0*wd/hns;
-
+	
 	cout << "wd, wd2, sssv1: " << wd << " " << wd2 << " " << sssv1 << endl;
       } else {
 	w0=surf;
 	w02=surf2;
 	cout << "w0, w02: " << w0 << " " << w02 << endl;
       }
-      
+
 #ifdef NEVER_DEFINED
       
       //--------------------------------------------
@@ -862,13 +804,15 @@ public:
       
 #endif
       
-      hdf_file hf;
-      string tablename=((string)"rel")+std::to_string(pf_index);
-      hf.open_or_create("rel.o2");
-      hdf_output(hf,at,tablename);
-      hf.close();
-      cout << "Wrote solution to file 'rel.o2'" << endl;
-      cout << endl;
+      if (true) {
+	hdf_file hf;
+	string tablename=((string)"rel")+std::to_string(pf_index);
+	hf.open_or_create("rel.o2");
+	hdf_output(hf,at,tablename);
+	hf.close();
+	cout << "Wrote solution to file 'rel.o2'" << endl;
+	cout << endl;
+      }
       
     }
 

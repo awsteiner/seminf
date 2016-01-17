@@ -1,8 +1,8 @@
 FLAGS = -I$(GSL_INC) -I$(O2SCL_INC) -std=c++0x -I$(EIGEN_INC) -I$(HDF5_INC) \
 	-Wno-deprecated-declarations
 #-DDEBUG
-LIBS = -L$(GSL_LIB) -L$(O2SCL_LIB) \
-	-lo2scl_eos -lo2scl_part -lo2scl_hdf -lo2scl \
+LIBS = -L$(GSL_LIB) -L$(O2SCL_LIB) -L$(HDF5_LIB) \
+	-lo2scl_eos -lo2scl_part -lo2scl_hdf -lo2scl -lhdf5 -lhdf5_hl \
 	-lreadline -lgsl -lgslcblas -lm
 
 relax.o: relax.cpp relax.h
@@ -17,7 +17,7 @@ nr: nr.o relax.o
 rel.o: rel.cpp
 	$(CXX) $(FLAGS) -c rel.cpp
 
-rel: rel.o relax.o
+rel: rel.o
 	$(CXX) $(FLAGS) -o rel rel.o $(LIBS)
 
 clean:
