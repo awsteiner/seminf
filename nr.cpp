@@ -48,42 +48,11 @@ using namespace o2scl;
 using namespace o2scl_const;
 using namespace o2scl_hdf;
 
-typedef boost::numeric::ublas::vector<double> ubvector;
-typedef boost::numeric::ublas::matrix<double> ubmatrix;
-typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
-
 //--------------------------------------------
 // Global variables
 
 static const double big=3.0;
 static const int ngrid=100;
-
-/// If true, output relaxation iterations (default false)
-bool relaxfile;
-/// If true, \f$ Q_{nn}=Q_{np} \f$
-bool qnn_equals_qnp;
-/// If true, match to exponential decay on the RHS
-bool rhsmode;
-/// Minimum err
-double minerr;
-/// Desc
-double monfact;
-/// Desc
-double expo;
-/// Neutron drip density
-double nndrip;
-/// Proton drip density
-double npdrip;
-/// Desc (default false)
-bool flatden;
-/// Nonlinear equation solver
-mroot_hybrids<> nd;
-/// Desc
-double nnrhs;
-/// Desc
-double nprhs;
-/// Desc
-double rhslength;
 
 /** \brief Structure for relax parameters
  */
@@ -137,33 +106,55 @@ public:
   thermo hb;
 };
 
-class seminf_nr *snp;
-
-/** \brief Desc
-
-   \warning This code is very preliminary, and needs quite a bit of
-   work.
-   
-   \warning Does not work with dripped protons yet.
-   
-   \note The first proton fraction cannot be 0.5, as the 
-   algorithm cannot handle later values different from 0.5
-   
-   12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
-   nndrip becomes > 0. It seems that in this case, it is better not to
-   automatically adjust the scale of the x-axis, but use a gradual
-   broadening similar to what we have done using the relativistic
-   code. This allows calculation down to really low proton fractions!
-   We need to see if this is consistent with the analytic code for
-   both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
- */
+/** \brief Semi-infinite nuclear matter for nonrelativistic
+    models in the Thomas-Fermi approximation
+    
+    \warning This code is very preliminary, and needs quite a bit of
+    work.
+    
+    \warning Does not work with dripped protons yet.
+    
+    \note The first proton fraction cannot be 0.5, as the 
+    algorithm cannot handle later values different from 0.5
+    
+    12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
+    nndrip becomes > 0. It seems that in this case, it is better not to
+    automatically adjust the scale of the x-axis, but use a gradual
+    broadening similar to what we have done using the relativistic
+    code. This allows calculation down to really low proton fractions!
+    We need to see if this is consistent with the analytic code for
+    both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
+*/
 class seminf_nr {
   
-public:
+protected:
   
-  seminf_nr() {
-    rhslength=2.0;
-  }
+  /// If true, output relaxation iterations (default false)
+  bool relaxfile;
+  /// If true, \f$ Q_{nn}=Q_{np} \f$
+  bool qnn_equals_qnp;
+  /// If true, match to exponential decay on the RHS
+  bool rhsmode;
+  /// Minimum err
+  double minerr;
+  /// Desc
+  double monfact;
+  /// Desc
+  double expo;
+  /// Neutron drip density
+  double nndrip;
+  /// Proton drip density
+  double npdrip;
+  /// Desc (default false)
+  bool flatden;
+  /// Nonlinear equation solver
+  mroot_hybrids<> nd;
+  /// Desc
+  double nnrhs;
+  /// Desc
+  double nprhs;
+  /// Desc
+  double rhslength;
 
   /// If true, we have good boundary conditions
   bool goodbound;
@@ -201,12 +192,885 @@ public:
   deriv_gsl<> df;
   relaxp rp;
   
+  /** \brief Desc
+   */
+  int derivs2(double sx, const ubvector &sy, ubvector &dydx) {
+    double rhsn, rhsp=0.0, det;
+    double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
+
+    rp.n.n=sy[0];
+    rp.p.n=sy[1];
+    if (model=="apr") {
+      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
+			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+    }
+    if (model=="gp") {
+      thermo thth;
+      if (false) {
+	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+      } else {
+	rp.qnn=100.0/hc_mev_fm;
+	rp.qpp=100.0/hc_mev_fm;
+	rp.qnp=90.0/hc_mev_fm;
+	dqnndnn=0.0;
+	dqnndnp=0.0;
+	dqnpdnn=0.0;
+	dqnpdnp=0.0;
+	dqppdnn=0.0;
+	dqppdnp=0.0;
+      }
+    }
+
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+
+    if (rp.n.n<=0.0) {
+      if (rp.p.n<=0.0) {
+	dydx[0]=0.0;
+	dydx[1]=0.0;
+	dydx[2]=0.0;
+	dydx[3]=0.0;
+      } else {
+	dydx[0]=0.0;
+	dydx[1]=sy[3];
+	dydx[2]=0.0;
+	if (model!="apr" && model!="gp") {
+	  dydx[3]=(rp.p.mu-rp.mup)/rp.qpp;
+	} else {
+	  dydx[3]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[3]*sy[3])/rp.qpp;
+	}
+      }
+    } else if (rp.p.n<=0.0) {
+      dydx[0]=sy[2];
+      dydx[1]=0.0;
+      if (model!="apr" && model!="gp") {
+	dydx[2]=(rp.n.mu-rp.mun)/rp.qnn;
+      } else {
+	dydx[2]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+      }
+      dydx[3]=0.0;
+    } else {
+      if (rhsmode==false) {
+	if (model!="apr" && model!="gp") {
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	  rhsn/=det;
+	  rhsp/=det;
+	} else {
+	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+		dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qpp-
+	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+	     dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnp;
+	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+		dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnn-
+	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+	     dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qnp;
+	  rhsn/=det;
+	  rhsp/=det;
+	}
+      } else {
+	if (model!="apr" && model!="gp") {
+	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
+	  rhsp=0.0;
+	} else {
+	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+	  rhsp=0.0;
+	}
+      }
+    
+      dydx[0]=sy[2];
+      dydx[1]=sy[3];
+      dydx[2]=rhsn;
+      dydx[3]=rhsp;
+    }
+  
+    //--------------------------------------------
+    // Return sensible results 
+
+    if (!std::isfinite(dydx[2])) {
+      cout << "3 not finite." << endl;
+      dydx[2]=0.0;
+    }
+    if (!std::isfinite(dydx[3])) {
+      cout << "4 not finite." << endl;
+      dydx[3]=0.0;
+    }
+  
+    return 0;
+  }
+
+  /** \brief Desc
+   */
+  double solve_qnn_neq_qnp(double lmonfact, int argc) {
+    bool guessdone;
+    int debug=0;
+    double dx, xrhs, delta, epsi;
+    ubvector y(5), dydx(5);
+    int ilast=0, interpi;
+    ofstream itout;
+    char ch;
+    int n_eq=5, n_b;
+    ubvector ox(ngrid);
+    ubmatrix oy(ngrid,n_eq);
+
+    monfact=lmonfact;
+
+    //----------------------------------------------
+    // Create object
+
+    if (flatden) {
+      //rel=new seminf_nr_relax(5,3,ngrid);
+      n_b=3;
+    } else {
+      //rel=new seminf_nr_relax(5,4,ngrid);
+      n_b=4;
+    }
+    //rel->itmax=100;
+    //rel->rp=&rp;
+    
+    ode_it_funct11 f_derivs=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_nr::difeq2),this,std::placeholders::_1,std::placeholders::_2,
+       std::placeholders::_3);       
+    ode_it_funct11 f_left=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_nr::left2),this,std::placeholders::_1,std::placeholders::_2,
+       std::placeholders::_3);       
+    ode_it_funct11 f_right=std::bind
+      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+       (&seminf_nr::right2),this,std::placeholders::_1,std::placeholders::_2,
+       std::placeholders::_3);   
+    ode_it_solve2 oit;
+    ubmatrix A(ngrid*n_eq,ngrid*n_eq);
+    ubvector rhs(ngrid*n_eq), dy(ngrid*n_eq);
+    
+    if (rp.pf_index==1) {
+
+      //----------------------------------------------
+      // Construct a guess by shooting
+    
+      xstor[1]=0.0;
+      ystor(1,1)=rp.nn0;
+      ystor(2,1)=rp.np0;
+      ystor(3,1)=firstderiv;
+      ystor(4,1)=firstderiv;
+      dx=initialstep/((double)ngrid);
+    
+      if (debug>0) {
+	cout.width(3);
+	cout << 1 << " " 
+	     << xstor[1] << " " << ystor(1,1) << " " << ystor(2,1) << " "
+	     << ystor(3,1) << " " << ystor(4,1) << endl;
+      }
+    
+      guessdone=false;
+      for(int i=2;guessdone==false && i<=ngrid;i++) {
+	xstor[i]=xstor[i-1]+dx;
+      
+	for(int j=0;j<4;j++) {
+	  y[j]=ystor(j+1,i-1);
+	}
+	derivs2(xstor[i-1],y,dydx);
+	for(int j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
+      
+	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
+	  guessdone=true;
+	  ilast=i-1;
+	  i=ngrid+10;
+	} else if (debug>0) {
+	  cout.width(3);
+	  cout << i << " " 
+	       << xstor[i] << " " << ystor(1,i) << " " << ystor(2,i) << " "
+	       << ystor(3,i) << " " << ystor(4,i) << endl;
+	}
+      }
+
+      // If ilast wasn't set, then nn and np never became smaller than
+      // nndrip or npdrip. In that case, just use the entire guess.
+      if (ilast==0) ilast=100;
+    
+      //----------------------------------------------
+      // Arrange guess into relaxation arrays and
+      // stretch the solution to grid size=ngrid
+
+      ox[0]=xstor[1];
+      ox[ngrid-1]=xstor[ilast];
+      for(int i=1;i<ngrid-1;i++) {
+	ox[i]=ox[0]+((double)(i))/((double)(ngrid-1))*
+	  (ox[ngrid-1]-ox[0]);
+      }
+      interpi=1;
+      for(int i=0;i<ngrid;i++) {
+	while(ox[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
+	while(ox[i]<xstor[interpi] && interpi>1) interpi--;
+	for(int j=0;j<4;j++) {
+	  oy(i,j)=ystor(j+1,interpi)+
+	    (ystor(j+1,interpi+1)-ystor(j+1,interpi))*
+	    (ox[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
+	}
+	oy(i,4)=ox[ngrid-1];
+	ox[i]=((double)(i))/((double)(ngrid-1));
+      }
+    
+    } else {
+
+      //----------------------------------------------
+      // Use last solution for guess
+    
+      for(int i=0;i<ngrid;i++) {
+	ox[i]=xg1[i+1];
+	for(int j=0;j<n_eq;j++) {
+	  oy(i,j)=yg1[j+1][i+1];
+	}
+      }
+
+    }
+
+    //----------------------------------------------
+    // Try ode_it_solve
+
+    rhsmode=false;
+
+    if (true || argc>=2) {
+      /*
+	for(int i=1;i<=ngrid;i++) {
+	ox[i-1]=rel->x[i];
+	for(int j=1;j<=n_eq;j++) {
+	oy(i-1,j-1)=rel->y(j,i);
+	}
+	}
+      */
+      for(int i=0;i<ngrid;i+=9) {
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " " << ox[i] << " ";
+	for(int j=0;j<5;j++) {
+	  cout << oy(i,j) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+      }
+      oit.verbose=1;
+      oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
+		A,rhs,dy);
+      for(int i=0;i<ngrid;i+=9) {
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " " << ox[i] << " ";
+	for(int j=0;j<5;j++) {
+	  cout << oy(i,j) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+      }
+    }
+
+    //----------------------------------------------
+    // Solve
+
+    //int relret1=rel->solve(relaxconverge,1.0);
+  
+    //----------------------------------------------
+    // Copy solution for next guess
+
+    for(int i=1;i<=ngrid;i++) {
+      xg1[i]=ox(i-1);
+      for(int j=1;j<=n_eq;j++) {
+	yg1[j][i]=oy(i-1,j-1);
+      }
+    }
+  
+    //----------------------------------------------
+    // Rescale solution
+
+    for(int i=0;i<ngrid;i++) {
+      ox[i]=ox[i]*oy(i,4);
+    }
+
+    //----------------------------------------------
+    // Store quantites at rhs for later use
+
+    xrhs=ox[ngrid-1];
+    if (npdrip==0.0) {
+      nnrhs=oy(ngrid-1,0);
+      cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
+      if (nnrhs<rhsmin) {
+	nnrhs=rhsmin;
+	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
+      }
+    } else {
+      nprhs=oy(ngrid-1,1);
+      cout << "RHS, nprhs=" << nprhs << endl;
+      if (nprhs<rhsmin) {
+	nprhs=rhsmin;
+	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
+      }
+    }
+
+    //----------------------------------------------
+    // Store solution and delete seminf_nr_relax
+
+    at.set_nlines(ngrid);
+    for(int i=0;i<ngrid;i++) {
+      at.set(0,i,ox[i]);
+      for(int j=0;j<5;j++) {
+	at.set(j+1,i,oy(i,j));
+      }
+    }
+    //delete rel;
+
+    //----------------------------------------------
+    // RHS
+    
+    if (fabs(rp.protfrac-0.5)>1.0e-4) {
+
+      at.set_nlines(ngrid*2-1);
+
+      //rel=new seminf_nr_relax(3,1,ngrid);
+      //rel->itmax=100;
+      //rel->rp=&rp;
+
+      if (rp.pf_index==1) {
+	//----------------------------------------------
+	// Construct a simple linear guess
+      
+	if (npdrip==0.0) {
+	  for(int i=0;i<ngrid;i++) {
+	    ox[i]=((double)i)/((double)(ngrid-1));
+	    oy(i,0)=(nnrhs-nndrip)*(1.0-ox[i])+nndrip;
+	    oy(i,1)=-0.08*(1.0-ox[i]);
+	    oy(i,2)=0.001;
+	  }
+	} else {
+	  for(int i=0;i<ngrid;i++) {
+	    ox[i]=((double)i)/((double)(ngrid-1));
+	    oy(i,0)=(nprhs-npdrip)*(1.0-ox[i])+npdrip;
+	    oy(i,1)=-0.08*(1.0-ox[i]);
+	    oy(i,2)=0.001;
+	  }
+	}
+
+      } else {
+	
+	//----------------------------------------------
+	// Use last solution for guess
+      
+	for(int i=0;i<ngrid;i++) {
+	  ox[i]=xg2[i+1];
+	  for(int j=0;j<3;j++) {
+	    oy(i,j)=yg2[j+1][i+1];
+	  }
+	}
+
+      }
+
+      //----------------------------------------------
+      // Solve
+  
+      n_eq=3;
+      n_b=1;
+
+      for(int i=0;i<ngrid;i+=9) {
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " " << ox[i] << " ";
+	for(int j=0;j<3;j++) {
+	  cout << oy(i,j) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+      }
+      
+      rhsmode=true;
+      cout << "second solve: " << nndrip << endl;
+
+      if (nndrip>0.0) {
+	cout << "Rhs length: " << rhslength << endl;
+	//int relret2=rel->solve(relaxconverge,1.0);
+	
+	while (-oy(ngrid-1,1)>1.0e-4) {
+	  rhslength*=1.2;
+
+	  cout << "Rhs length: " << rhslength << endl;
+	  //relret2=rel->solve(relaxconverge,1.0);
+	}
+      } else {
+	oit.verbose=1;
+	oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
+		  A,rhs,dy);
+	//int relret2=rel->solve(relaxconverge,1.0);
+      }
+    
+      for(int i=0;i<ngrid;i+=9) {
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " " << ox[i] << " ";
+	for(int j=0;j<3;j++) {
+	  cout << oy(i,j) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+      }
+
+      //----------------------------------------------
+      // Copy solution for next guess
+
+      for(int i=1;i<=ngrid;i++) {
+	xg2[i]=ox(i-1);
+	for(int j=1;j<=n_eq;j++) {
+	  yg2[j][i]=oy(i-1,j-1);
+	}
+      }
+  
+      //----------------------------------------------
+      // Store solution and delete seminf_nr_relax
+      
+      for(int i=0;i<ngrid;i++) {
+	at.set(0,i+ngrid-1,ox(i));
+	for(int j=0;j<3;j++) {
+	  at.set(j+1,i+ngrid-1,oy(i,j));
+	}
+      }
+      //delete rel;
+
+      //----------------------------------------------
+      // Rearrangment and rescaling
+
+      cout << npdrip << endl;
+      if (npdrip==0.0) {
+	for(int i=ngrid-1;i<2*ngrid-1;i++) {
+	  at.set(5,i,at.get(3,i));
+	  at.set(4,i,0.0);
+	  at.set(3,i,at.get(2,i));
+	  at.set(2,i,0.0);
+	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
+	}
+      } else {
+	for(int i=1;i<=ngrid;i++) {
+	  at.set(5,i,at.get(3,i));
+	  at.set(4,i,at.get(2,i));
+	  at.set(3,i,0.0);
+	  at.set(2,i,at.get(1,i));
+	  at.set(1,i,0.0);
+	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
+	}
+      }
+      //    at.set_nlines(2*ngrid-1);
+    }
+    
+    for(int i=0;i<2*ngrid-1;i+=9) {
+      if (i==108) i-=8;
+      cout.precision(4);
+      cout.width(3);
+      cout << i << " ";
+      for(int j=0;j<6;j++) {
+	cout << at.get(j,i) << " ";
+      }
+      cout << endl;
+      cout.precision(6);
+      if (i==190) i--;
+    }
+
+    return 0.0;
+  }
+  
+#ifdef NEVER_DEFINED
+  /** \brief Desc
+   */
+  double solve_qnn_equal_qnp(double lmonfact) {
+    bool guessdone, debug=false;
+    double dx, y[5], dydx[5], xrhs;
+    int ilast=0, interpi;
+    ofstream itout;
+    char ch;
+    ubvector sx(3), sy(3);
+    int n_eq=3, n_b=2;
+
+    monfact=lmonfact;
+
+    //----------------------------------------------
+    // Create object
+
+    rel=new seminf_nr_relax(3,2,ngrid);
+    rel->itmax=200;
+    rel->rp=&rp;
+
+    //----------------------------------------------
+    // Construct a guess by shooting
+
+    if (rp.pf_index==1) {
+      xstor[1]=0.0;
+      ystor(1,1)=rp.nn0+rp.np0;
+      ystor(2,1)=firstderiv;
+      dx=initialstep/((double)ngrid);
+    
+      guessdone=false;
+      for(int i=2;guessdone==false && i<=ngrid;i++) {
+	xstor[i]=xstor[i-1]+dx;
+      
+	sx[1]=(1.0-rp.protfrac)*ystor(1,i-1);
+	sx[2]=rp.protfrac*ystor(1,i-1);
+	rp.barn=ystor(1,i-1);
+	mm_funct11 qqf=std::bind
+	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+	   (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
+	   std::placeholders::_2,std::placeholders::_3);
+	nd.msolve(2,sx,qqf);
+      
+	ystor(1,i)=ystor(1,i-1)+dx*ystor(2,i-1);
+	ystor(2,i)=ystor(2,i-1)+dx*(rp.n.mu-rp.mun)/(rp.qnn);
+      
+	if (sx[2]<nndrip+npdrip+1.0e-6 || ystor(2,i)>0.0) {
+	  guessdone=true;
+	  ilast=i-1;
+	  i=ngrid+10;
+	} else if (debug) {
+	  cout << i << " " << xstor[i] << " " << ystor(1,i) << " " 
+	       << ystor(2,i) << endl;
+	}
+      }
+    
+      //----------------------------------------------
+      // Stretch the solution to the grid ngrid
+    
+      rel->x[1]=xstor[1];
+      rel->x[ngrid]=xstor[ilast];
+      for(int i=2;i<ngrid;i++) {
+	rel->x[i]=rel->x[1]+((double)(i-1))/((double)(ngrid-1))*
+	  (rel->x[ngrid]-rel->x[1]);
+      }
+      interpi=1;
+      for(int i=1;i<=ngrid;i++) {
+	while(rel->x[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
+	while(rel->x[i]<xstor[interpi] && interpi>1) interpi--;
+	for(int j=1;j<=2;j++) {
+	  rel->y(j,i)=ystor(j,interpi)+
+	    (ystor(j,interpi+1)-ystor(j,interpi))*
+	    (rel->x[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
+	}
+	rel->y(3,i)=(rel->x[ngrid]);
+	rel->x[i]=((double)(i-1))/((double)(ngrid-1));
+      }
+
+    } else {
+
+      //----------------------------------------------
+      // Use last solution for guess
+    
+      for(int i=1;i<=ngrid;i++) {
+	rel->x[i]=xg1[i];
+	for(int j=1;j<=n_eq;j++) {
+	  rel->y(j,i)=yg1[j][i];
+	}
+      }
+    }
+
+    //----------------------------------------------
+    // Solve
+
+    rhsmode=false;
+    int relret1=rel->solve(relaxconverge,1.0);
+  
+    //----------------------------------------------
+    // Copy solution for next guess
+
+    for(int i=1;i<=ngrid;i++) {
+      xg1[i]=rel->x[i];
+      for(int j=1;j<=n_eq;j++) {
+	yg1[j][i]=rel->y(j,i);
+      }
+    }
+  
+    //----------------------------------------------
+    // Rescale solution and set neutron and proton
+    // densities:
+
+    at.set_nlines(ngrid);
+    for(int i=1;i<=rel->ngrid;i++) {
+
+      sx[1]=(1.0-rp.protfrac)*rel->y(1,i);
+      sx[2]=rp.protfrac*rel->y(1,i);
+
+      rp.barn=rel->y(1,i);
+      mm_funct11 qqf=std::bind
+	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+	 (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
+	 std::placeholders::_2,std::placeholders::_3);
+      nd.msolve(2,sx,qqf);
+
+      at.set(0,i-1,rel->x[i]*rel->y(3,i));
+      at.set(1,i-1,sx[1]);
+      at.set(2,i-1,sx[2]);
+      at.set(3,i-1,rel->y(2,i));
+      at.set(4,i-1,0.0);
+      at.set(5,i-1,rel->y(3,i));
+    }
+
+    //----------------------------------------------
+    // Store quantites at rhs for later use:
+  
+    xrhs=at[0][ngrid-1];
+    if (npdrip==0.0) {
+      nnrhs=at[1][ngrid-1];
+      cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
+      if (nnrhs<rhsmin) {
+	nnrhs=rhsmin;
+	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
+      }
+    } else {
+      nprhs=at[2][ngrid-1];
+      cout << "RHS, nprhs=" << nprhs << endl;
+      if (nprhs<rhsmin) {
+	nprhs=rhsmin;
+	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
+      }
+    }
+
+    //----------------------------------------------
+    // Delete seminf_nr_relax
+
+    delete rel;
+
+    //---------------------------------------------
+    // RHS
+    
+    if (fabs(rp.protfrac-0.5)>1.0e-4) {
+      rel=new seminf_nr_relax(3,1,ngrid);
+      rel->rp=&rp;
+    
+      if (rp.pf_index==1) {
+	//----------------------------------------------
+	// Construct a simple linear guess
+      
+	if (npdrip==0.0) {
+	  for(int i=1;i<=ngrid;i++) {
+	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
+	    rel->y(1,i)=(nnrhs-nndrip)*(1.0-rel->x[i])+nndrip;
+	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
+	    rel->y(3,i)=0.001;
+	  }
+	} else {
+	  for(int i=1;i<=ngrid;i++) {
+	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
+	    rel->y(1,i)=(nprhs-npdrip)*(1.0-rel->x[i])+npdrip;
+	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
+	    rel->y(3,i)=0.001;
+	  }
+	}
+      } else {
+	//----------------------------------------------
+	// Use last solution for guess
+      
+	for(int i=1;i<=ngrid;i++) {
+	  rel->x[i]=xg2[i];
+	  for(int j=1;j<=n_eq;j++) {
+	    rel->y(j,i)=yg2[j][i];
+	  }
+	}
+      
+      }
+    
+      //----------------------------------------------
+      // Solve
+    
+      rhsmode=true;
+      int relret2=rel->solve(relaxconverge,1.0);
+    
+      //----------------------------------------------
+      // Copy solution for next guess
+    
+      for(int i=1;i<=ngrid;i++) {
+	xg2[i]=rel->x[i];
+	for(int j=1;j<=n_eq;j++) {
+	  yg2[j][i]=rel->y(j,i);
+	}
+      }
+    
+      //----------------------------------------------
+      // Store solution, rescale, and delete seminf_nr_relax
+    
+      at.set_nlines(2*ngrid-1);
+      for(int i=1;i<=rel->ngrid;i++) {
+	at.set(5,i-2+ngrid,rel->y(3,i));
+	at.set(3,i-2+ngrid,rel->y(2,i));
+	at.set(4,i-2+ngrid,0.0);
+	at.set(2,i-2+ngrid,0.0);
+	at.set(1,i-2+ngrid,rel->y(1,i));
+	at.set(0,i-2+ngrid,rel->x[i]*rel->y(3,i)+xrhs);
+      }
+      delete rel;
+    }
+  
+    return 0.0;
+
+  }
+#endif
+  
+  /** \brief Desc
+   */
+  int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
+
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
+    if (sx[1]<0.0 || sx[2]<0.0) return 1;
+  
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+
+    sy[1]=rp.n.n+rp.p.n-rp.barn;
+    sy[2]=rp.n.mu-rp.p.mu-rp.mun+rp.mup;
+
+    return 0;
+  }
+
+  /** \brief Desc
+   */
+  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+    double pleft, pright, munleft, munright;
+
+    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
+
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
+    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
+  
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pleft=rp.hb.pr;
+    munleft=rp.n.mu;
+
+    rp.n.n=sx[3];
+    rp.p.n=0.0;
+  
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pright=rp.hb.pr;
+    munright=rp.n.mu;
+
+    sy[2]=pleft-pright;
+    sy[3]=munleft-munright;
+
+    return 0;
+  }
+
+  /** \brief Desc
+   */
+  int pdripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+    double pleft, pright, mupleft, mupright;
+
+    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
+
+    rp.n.n=sx[1];
+    rp.p.n=sx[2];
+    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
+  
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pleft=rp.hb.pr;
+    mupleft=rp.p.mu;
+
+    rp.n.n=0.0;
+    rp.p.n=sx[3];
+  
+    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    pright=rp.hb.pr;
+    mupright=rp.p.mu;
+
+    sy[2]=pleft-pright;
+    sy[3]=mupleft-mupright;
+
+    return 0;
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
+    if (rhsmode==false) {
+      ubvector y2=y, dydx(5);
+      derivs2(x,y2,dydx);
+      if (ieq==0) {
+	return dydx[0]*y[4];
+      } else if (ieq==1) {
+	return dydx[1]*y[4];
+      } else if (ieq==2) {
+	return dydx[2]*y[4];
+      } else if (ieq==3) {
+	return dydx[3]*y[4];
+      }
+      return 0.0;
+    } else {
+      ubvector y2(5), dydx(5);
+      y2[0]=y[0];
+      y2[1]=0.0;
+      y2[2]=y[1];
+      y2[3]=0.0;
+      y2[4]=y[2];
+      derivs2(x,y2,dydx);
+      if (ieq==0) {
+	return dydx[0]*y[2];
+      } else if (ieq==1) {
+	return dydx[2]*y[2];
+      }
+      return 0.0;
+    }
+    O2SCL_ERR("Sanity in difeq2().",exc_esanity);
+    return 0.0;
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double left2(size_t ieq, double x, ubmatrix_row &y) {
+
+    if (rhsmode==false) {
+      
+      double delta=rp.nn0*monfact/exp(big*expo);
+      double epsi=delta*(-rp.dmundn+rp.qnn*expo*expo)/
+	(rp.dmundp-rp.qnp*expo*expo);
+      
+      if (epsi*delta<0.0) {
+	cout << "epsi and delta have different signs" << endl;
+	exit(-1);
+      }
+      
+      double ret;
+      if (ieq==0) {
+	ret=y[0]-(rp.nn0-delta*exp(big*expo));
+      } else if (ieq==1) {
+	ret=y[1]-(rp.np0-epsi*exp(big*expo));
+      } else if (ieq==2) {
+	ret=y[2]+delta*expo*exp(big*expo);
+      } else {
+	ret=y[3]+epsi*expo*exp(big*expo);
+      }
+      return ret;
+      
+    }
+
+    // If rhsmode is true
+    return y[0]-nnrhs;
+  }
+
+  /** \brief Future function for \ref o2scl::ode_it_solve
+   */
+  double right2(size_t ieq, double x, ubmatrix_row &y) {
+    if (rhsmode==false) {
+      return y[1];
+    }
+    // If rhsmode is true
+    if (ieq==0) {
+      return y[0]-nndrip;
+    }
+    return y[1];
+  }
+  
+public:
+  
+  seminf_nr() {
+    rhslength=2.0;
+  }
+
   //--------------------------------------------
   // Function prototypes
   
   int run(int argc, char *argv[]) {
-
-    snp=this;
 
     double wd=0.0, wd2=0.0, dtemp;
     double rhsn, rhsp, det;
@@ -214,7 +1078,7 @@ public:
     ubvector sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0;
     // Locations of fixed relative densities
-    double xn[4], xp[4];
+    double xn[3], xp[3];
     double thick;
     int pf_index, npf;
     ofstream fout;
@@ -658,16 +1522,21 @@ public:
       // Calculate the value of x for nn*0.9, nn*0.5, 
       // nn*0.1, etc.
 
+      verbose=2;
       if (verbose>1) cout << "Lookups. " << endl;
-      for(int i=1;i<=3;i++) {
-	xn[i]=lookup(at.get_nlines(),
-		     nndrip+(rp.nn0-nndrip)/10.0*((double)(i*4-3)),
-		     at[0],at[1]);
-	xp[i]=lookup(at.get_nlines(),
-		     npdrip+(rp.np0-npdrip)/10.0*((double)(i*4-3)),
-		     at[0],at[2]);
-      }
+      cout << at.get_nlines() << endl;
 
+      o2scl::interp<std::vector<double>,std::vector<double> > it(itp_linear);
+      
+      for(int i=0;i<3;i++) {
+	xn[i]=it.eval(nndrip+(rp.nn0-nndrip)/10.0*((double)(i*4+1)),
+		      at.get_nlines(),at.get_column("nn"),
+		      at.get_column("x"));
+	xp[i]=it.eval(npdrip+(rp.np0-npdrip)/10.0*((double)(i*4+1)),
+		      at.get_nlines(),at.get_column("np"),
+		      at.get_column("x"));
+      }
+      
       delta=1.0-2.0*rp.protfrac;
       rp.barn=rp.nsat;
       hns=rp.eos->fesym(rp.barn);
@@ -775,25 +1644,25 @@ public:
 	rhsmode=false;
 
 	for(int i=1;i<((int)at.get_nlines());i++) {
-
+	  
 	  at.set("nnpp",i,(at.get("nnp",i)-at.get("nnp",i-1))/
 		 (at.get("x",i)-at.get("x",i-1)));
 	  at.set("nppp",i,(at.get("npp",i)-at.get("npp",i-1))/
 		 (at.get("x",i)-at.get("x",i-1)));
 	
 	  tx=(at.get("x",i)+at.get("x",i-1))/2.0;
-	  ty[1]=(at.get("nn",i)+at.get("nn",i-1))/2.0;
-	  ty[2]=(at.get("np",i)+at.get("np",i-1))/2.0;
-	  ty[3]=(at.get("nnp",i)+at.get("nnp",i-1))/2.0;
-	  ty[4]=(at.get("npp",i)+at.get("npp",i-1))/2.0;
+	  ty[0]=(at.get("nn",i)+at.get("nn",i-1))/2.0;
+	  ty[1]=(at.get("np",i)+at.get("np",i-1))/2.0;
+	  ty[2]=(at.get("nnp",i)+at.get("nnp",i-1))/2.0;
+	  ty[3]=(at.get("npp",i)+at.get("npp",i-1))/2.0;
 
-	  if (ty[2]<=0.0) rhsmode=true;
-	  derivs(tx,ty,tdy);
-
-	  at.set("rhsn",i,tdy[3]);
-	  at.set("rhsp",i,tdy[4]);
-
-	  if (ty[2]>0.0) {
+	  if (ty[1]<=0.0) rhsmode=true;
+	  derivs2(tx,ty,tdy);
+	  
+	  at.set("rhsn",i,tdy[2]);
+	  at.set("rhsp",i,tdy[3]);
+	  
+	  if (ty[1]>0.0) {
 	    at.set("lhs_n",i,(rp.n.mu-rp.mun+rp.p.mu-rp.mup)/2.0);
 	    at.set("lhs_a",i,(rp.n.mu-rp.mun-rp.p.mu+rp.mup)/2.0);
 	    at.set("rhs_n",i,(at.get("nnpp",i)+at.get("nppp",i))/2.0*
@@ -817,1019 +1686,10 @@ public:
       cout << "Wrote solution to file 'nr.o2'" << endl;
       cout << endl;
 
-    // Loop for next proton fraction
+      // Loop for next proton fraction
     }
   
     return 0;
-  }
-
-  /** \brief Desc
-   */
-  double lookup(int n, double yy0, const std::vector<double> &x,
-		const std::vector<double> &y) {
-
-    for(int i=2;i<=n;i++) {
-      if ((y[i]>=yy0 && y[i-1]<yy0) || (y[i]<yy0 && y[i-1]>=yy0)) {
-	double x0=x[i-1]+(x[i]-x[i-1])*(yy0-y[i-1])/(y[i]-y[i-1]);
-	return x0;
-      }
-    }
-
-    return 0.0;
-  }
-
-  /** \brief Desc
-   */
-  int derivs(double sx, const ubvector &sy, ubvector &dydx) {
-    double rhsn, rhsp=0.0, det;
-    double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
-    
-    rp.n.n=sy[1];
-    rp.p.n=sy[2];
-    if (model=="apr") {
-      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
-    }
-    if (model=="gp") {
-      thermo thth;
-      if (false) {
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
-			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
-      } else {
-	rp.qnn=100.0/hc_mev_fm;
-	rp.qpp=100.0/hc_mev_fm;
-	rp.qnp=90.0/hc_mev_fm;
-	dqnndnn=0.0;
-	dqnndnp=0.0;
-	dqnpdnn=0.0;
-	dqnpdnp=0.0;
-	dqppdnn=0.0;
-	dqppdnp=0.0;
-      }
-    }
-
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-#ifdef DEBUG
-    cout << "A: " << rp.n.n << " " << rp.p.n << " " << rp.qnn << endl;
-    cout << "B: " << rp.n.m << " " << rp.p.m << endl;
-    cout << "C: " << rp.n.mu << " " << rp.p.mu << endl;
-#endif
-    /*
-      double mun=rp.n.mu, mup=rp.p.mu, msn=rp.n.ms, msp=rp.p.ms;
-      double hed=rp.hb->ed, hpr=rp.hb->pr, part;
-      if (rp.pf_index==1) part=1000.0;
-      else if (rp.pf_index==2) part=100.0;
-      else if (rp.pf_index==3) part=40.0;
-      else if (rp.pf_index==4) part=20.0;
-      else if (rp.pf_index==5) part=5.0;
-      else if (rp.pf_index==6) part=3.0;
-      else if (rp.pf_index==7) part=1.0;
-      else part=0.0;
-      eosa.calc_e(rp.n,rp.p,rp.hb);
-    
-      rp.n.mu=(rp.n.mu*part+mun)/(part+1.0);
-      rp.p.mu=(rp.p.mu*part+mup)/(part+1.0);
-      rp.n.ms=(rp.n.ms*part+msn)/(part+1.0);
-      rp.p.ms=(rp.p.ms*part+msp)/(part+1.0);
-      rp.hb->ed=(rp.hb->ed*part+hed)/(part+1.0);
-      rp.hb->pr=(rp.hb->pr*part+hpr)/(part+1.0);
-    */
-
-    if (rp.n.n<=0.0) {
-      if (rp.p.n<=0.0) {
-	dydx[1]=0.0;
-	dydx[2]=0.0;
-	dydx[3]=0.0;
-	dydx[4]=0.0;
-      } else {
-	dydx[1]=0.0;
-	dydx[2]=sy[4];
-	dydx[3]=0.0;
-	if (model!="apr" && model!="gp") {
-	  dydx[4]=(rp.p.mu-rp.mup)/rp.qpp;
-	} else {
-	  dydx[4]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[4]*sy[4])/rp.qpp;
-	}
-      }
-    } else if (rp.p.n<=0.0) {
-      dydx[1]=sy[3];
-      dydx[2]=0.0;
-      if (model!="apr" && model!="gp") {
-	dydx[3]=(rp.n.mu-rp.mun)/rp.qnn;
-      } else {
-	dydx[3]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[3]*sy[3])/rp.qnn;
-      }
-      dydx[4]=0.0;
-    } else {
-      if (rhsmode==false) {
-	if (model!="apr" && model!="gp") {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
-	  rhsn/=det;
-	  rhsp/=det;
-#ifdef DEBUG
-	  cout << "K: " << rhsn << " " << rhsp << " " << rp.n.mu << " "
-	       << rp.qpp << endl;
-	  cout << "L: " << rp.qnp << " " << rp.qnn << " "
-	       << rp.p.mu << " " << rp.mun << endl;
-#endif
-	} else {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
-		dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp.qpp-
-	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
-	     dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[3]*sy[3]-dqnpdnn*sy[3]*sy[3]-
-		dqppdnn*sy[3]*sy[4]-0.5*dqppdnp*sy[4]*sy[4])*rp.qnn-
-	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[3]*sy[3]+dqnndnp*sy[3]*sy[4]-
-	     dqnpdnp*sy[4]*sy[4]+0.5*dqppdnn*sy[4]*sy[4])*rp.qnp;
-	  rhsn/=det;
-	  rhsp/=det;
-	}
-      } else {
-	if (model!="apr" && model!="gp") {
-	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
-	  rhsp=0.0;
-	} else {
-	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[3]*sy[3])/rp.qnn;
-	  rhsp=0.0;
-	}
-      }
-
-      dydx[1]=sy[3];
-      dydx[2]=sy[4];
-      dydx[3]=rhsn;
-      dydx[4]=rhsp;
-    }
-  
-    //--------------------------------------------
-    // Return sensible results 
-
-    if (!std::isfinite(dydx[3])) {
-      cout << "3 not finite." << endl;
-      dydx[3]=0.0;
-    }
-    if (!std::isfinite(dydx[4])) {
-      cout << "4 not finite." << endl;
-      dydx[4]=0.0;
-    }
-  
-    return 0;
-  }
-
-  /** \brief Desc
-   */
-  int derivs2(double sx, const ubvector &sy, ubvector &dydx) {
-    double rhsn, rhsp=0.0, det;
-    double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
-
-    rp.n.n=sy[0];
-    rp.p.n=sy[1];
-    if (model=="apr") {
-      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
-    }
-    if (model=="gp") {
-      thermo thth;
-      if (false) {
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
-			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
-      } else {
-	rp.qnn=100.0/hc_mev_fm;
-	rp.qpp=100.0/hc_mev_fm;
-	rp.qnp=90.0/hc_mev_fm;
-	dqnndnn=0.0;
-	dqnndnp=0.0;
-	dqnpdnn=0.0;
-	dqnpdnp=0.0;
-	dqppdnn=0.0;
-	dqppdnp=0.0;
-      }
-    }
-
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-#ifdef DEBUG
-    cout << "A2: " << rp.n.n << " " << rp.p.n << " " << rp.qnn << endl;
-    cout << "B2: " << rp.n.m << " " << rp.p.m << endl;
-    cout << "C2: " << rp.n.mu << " " << rp.p.mu << endl;
-    #endif
-    /*
-      double mun=rp.n.mu, mup=rp.p.mu, msn=rp.n.ms, msp=rp.p.ms;
-      double hed=rp.hb->ed, hpr=rp.hb->pr, part;
-      if (rp.pf_index==1) part=1000.0;
-      else if (rp.pf_index==2) part=100.0;
-      else if (rp.pf_index==3) part=40.0;
-      else if (rp.pf_index==4) part=20.0;
-      else if (rp.pf_index==5) part=5.0;
-      else if (rp.pf_index==6) part=3.0;
-      else if (rp.pf_index==7) part=1.0;
-      else part=0.0;
-      eosa.calc_e(rp.n,rp.p,rp.hb);
-    
-      rp.n.mu=(rp.n.mu*part+mun)/(part+1.0);
-      rp.p.mu=(rp.p.mu*part+mup)/(part+1.0);
-      rp.n.ms=(rp.n.ms*part+msn)/(part+1.0);
-      rp.p.ms=(rp.p.ms*part+msp)/(part+1.0);
-      rp.hb->ed=(rp.hb->ed*part+hed)/(part+1.0);
-      rp.hb->pr=(rp.hb->pr*part+hpr)/(part+1.0);
-    */
-
-    if (rp.n.n<=0.0) {
-      if (rp.p.n<=0.0) {
-	dydx[0]=0.0;
-	dydx[1]=0.0;
-	dydx[2]=0.0;
-	dydx[3]=0.0;
-      } else {
-	dydx[0]=0.0;
-	dydx[1]=sy[3];
-	dydx[2]=0.0;
-	if (model!="apr" && model!="gp") {
-	  dydx[3]=(rp.p.mu-rp.mup)/rp.qpp;
-	} else {
-	  dydx[3]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[3]*sy[3])/rp.qpp;
-	}
-      }
-    } else if (rp.p.n<=0.0) {
-      dydx[0]=sy[2];
-      dydx[1]=0.0;
-      if (model!="apr" && model!="gp") {
-	dydx[2]=(rp.n.mu-rp.mun)/rp.qnn;
-      } else {
-	dydx[2]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
-      }
-      dydx[3]=0.0;
-    } else {
-      if (rhsmode==false) {
-	if (model!="apr" && model!="gp") {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
-	  rhsn/=det;
-	  rhsp/=det;
-#ifdef DEBUG
-	  cout << "K2: " << rhsn << " " << rhsp << " " << rp.n.mu << " "
-	       << rp.qpp << endl;
-	  cout << "L2: " << rp.qnp << " " << rp.qnn << " "
-	       << rp.p.mu << " " << rp.mun << endl;
-	  #endif
-	} else {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-		dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qpp-
-	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-	     dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-		dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnn-
-	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-	     dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qnp;
-	  rhsn/=det;
-	  rhsp/=det;
-	}
-      } else {
-	if (model!="apr" && model!="gp") {
-	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
-	  rhsp=0.0;
-	} else {
-	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
-	  rhsp=0.0;
-	}
-      }
-    
-      dydx[0]=sy[2];
-      dydx[1]=sy[3];
-      dydx[2]=rhsn;
-      dydx[3]=rhsp;
-    }
-  
-    //--------------------------------------------
-    // Return sensible results 
-
-    if (!std::isfinite(dydx[2])) {
-      cout << "3 not finite." << endl;
-      dydx[2]=0.0;
-    }
-    if (!std::isfinite(dydx[3])) {
-      cout << "4 not finite." << endl;
-      dydx[3]=0.0;
-    }
-  
-    return 0;
-  }
-
-  /** \brief Desc
-   */
-  double solve_qnn_neq_qnp(double lmonfact, int argc) {
-    bool guessdone;
-    int debug=0;
-    double dx, xrhs, delta, epsi;
-    ubvector y(5), dydx(5);
-    int ilast=0, interpi;
-    ofstream itout;
-    char ch;
-    int n_eq=5, n_b;
-    ubvector ox(ngrid);
-    ubmatrix oy(ngrid,n_eq);
-
-    monfact=lmonfact;
-
-    //----------------------------------------------
-    // Create object
-
-    if (flatden) {
-      //rel=new seminf_nr_relax(5,3,ngrid);
-      n_b=3;
-    } else {
-      //rel=new seminf_nr_relax(5,4,ngrid);
-      n_b=4;
-    }
-    //rel->itmax=100;
-    //rel->rp=&rp;
-
-    if (rp.pf_index==1) {
-
-      //----------------------------------------------
-      // Construct a guess by shooting
-    
-      xstor[1]=0.0;
-      ystor(1,1)=rp.nn0;
-      ystor(2,1)=rp.np0;
-      ystor(3,1)=firstderiv;
-      ystor(4,1)=firstderiv;
-      dx=initialstep/((double)ngrid);
-    
-      if (debug>0) {
-	cout.width(3);
-	cout << 1 << " " 
-	     << xstor[1] << " " << ystor(1,1) << " " << ystor(2,1) << " "
-	     << ystor(3,1) << " " << ystor(4,1) << endl;
-      }
-    
-      guessdone=false;
-      for(int i=2;guessdone==false && i<=ngrid;i++) {
-	xstor[i]=xstor[i-1]+dx;
-      
-	for(int j=0;j<4;j++) {
-	  y[j]=ystor(j+1,i-1);
-	}
-	derivs2(xstor[i-1],y,dydx);
-	for(int j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
-      
-	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
-	  guessdone=true;
-	  ilast=i-1;
-	  i=ngrid+10;
-	} else if (debug>0) {
-	  cout.width(3);
-	  cout << i << " " 
-	       << xstor[i] << " " << ystor(1,i) << " " << ystor(2,i) << " "
-	       << ystor(3,i) << " " << ystor(4,i) << endl;
-	}
-      }
-
-      // If ilast wasn't set, then nn and np never became smaller than
-      // nndrip or npdrip. In that case, just use the entire guess.
-      if (ilast==0) ilast=100;
-    
-      //----------------------------------------------
-      // Arrange guess into relaxation arrays and
-      // stretch the solution to grid size=ngrid
-
-      ox[0]=xstor[1];
-      ox[ngrid-1]=xstor[ilast];
-      for(int i=1;i<ngrid-1;i++) {
-	ox[i]=ox[0]+((double)(i))/((double)(ngrid-1))*
-	  (ox[ngrid-1]-ox[0]);
-      }
-      interpi=1;
-      for(int i=0;i<ngrid;i++) {
-	while(ox[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
-	while(ox[i]<xstor[interpi] && interpi>1) interpi--;
-	for(int j=0;j<4;j++) {
-	  oy(i,j)=ystor(j+1,interpi)+
-	    (ystor(j+1,interpi+1)-ystor(j+1,interpi))*
-	    (ox[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
-	}
-	oy(i,4)=ox[ngrid-1];
-	ox[i]=((double)(i))/((double)(ngrid-1));
-      }
-    
-    } else {
-
-      //----------------------------------------------
-      // Use last solution for guess
-    
-      for(int i=0;i<ngrid;i++) {
-	ox[i]=xg1[i+1];
-	for(int j=0;j<n_eq;j++) {
-	  oy(i,j)=yg1[j+1][i+1];
-	}
-      }
-
-    }
-
-    //----------------------------------------------
-    // Try ode_it_solve
-
-    rhsmode=false;
-
-    if (true || argc>=2) {
-      /*
-	for(int i=1;i<=ngrid;i++) {
-	ox[i-1]=rel->x[i];
-	for(int j=1;j<=n_eq;j++) {
-	oy(i-1,j-1)=rel->y(j,i);
-	}
-	}
-      */
-      for(int i=0;i<ngrid;i+=9) {
-	cout.precision(4);
-	cout.width(3);
-	cout << i << " " << ox[i] << " ";
-	for(int j=0;j<5;j++) {
-	  cout << oy(i,j) << " ";
-	}
-	cout << endl;
-	cout.precision(6);
-      }
-      ode_it_funct11 f_derivs=std::bind
-	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	 (&seminf_nr::difeq2),this,std::placeholders::_1,std::placeholders::_2,
-	 std::placeholders::_3);       
-      ode_it_funct11 f_left=std::bind
-	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	 (&seminf_nr::left2),this,std::placeholders::_1,std::placeholders::_2,
-	 std::placeholders::_3);       
-      ode_it_funct11 f_right=std::bind
-	(std::mem_fn<double(size_t,double,ubmatrix_row &)>
-	 (&seminf_nr::right2),this,std::placeholders::_1,std::placeholders::_2,
-	 std::placeholders::_3);   
-      ode_it_solve2 oit;
-      ubmatrix A(ngrid*n_eq,ngrid*n_eq);
-      ubvector rhs(ngrid*n_eq), dy(ngrid*n_eq);
-      oit.verbose=1;
-      oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
-		A,rhs,dy);
-      for(int i=0;i<ngrid;i+=9) {
-	cout.precision(4);
-	cout.width(3);
-	cout << i << " " << ox[i] << " ";
-	for(int j=0;j<5;j++) {
-	  cout << oy(i,j) << " ";
-	}
-	cout << endl;
-	cout.precision(6);
-      }
-    }
-
-    //----------------------------------------------
-    // Solve
-
-    //int relret1=rel->solve(relaxconverge,1.0);
-  
-    //----------------------------------------------
-    // Copy solution for next guess
-
-    for(int i=1;i<=ngrid;i++) {
-      xg1[i]=ox(i-1);
-      for(int j=1;j<=n_eq;j++) {
-	yg1[j][i]=oy(i-1,j-1);
-      }
-    }
-  
-    //----------------------------------------------
-    // Rescale solution
-
-    for(int i=0;i<ngrid;i++) {
-      ox[i]=ox[i]*oy(i,4);
-    }
-
-    //----------------------------------------------
-    // Store quantites at rhs for later use
-
-    xrhs=ox[ngrid-1];
-    if (npdrip==0.0) {
-      nnrhs=oy(ngrid-1,0);
-      cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
-      if (nnrhs<rhsmin) {
-	nnrhs=rhsmin;
-	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
-      }
-    } else {
-      nprhs=oy(ngrid-1,1);
-      cout << "RHS, nprhs=" << nprhs << endl;
-      if (nprhs<rhsmin) {
-	nprhs=rhsmin;
-	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
-      }
-    }
-
-    //----------------------------------------------
-    // Store solution and delete seminf_nr_relax
-
-    at.set_nlines(ngrid);
-    for(int i=0;i<ngrid;i++) {
-      at.set(0,i,ox[i]);
-      for(int j=0;j<5;j++) {
-	at.set(j+1,i,oy(i,j));
-      }
-    }
-    //delete rel;
-    exit(-1);
-
-    //----------------------------------------------
-    // RHS
-    
-    if (fabs(rp.protfrac-0.5)>1.0e-4) {
-
-      at.set_nlines(ngrid*2-1);
-
-      //rel=new seminf_nr_relax(3,1,ngrid);
-      //rel->itmax=100;
-      //rel->rp=&rp;
-
-      if (rp.pf_index==1) {
-	//----------------------------------------------
-	// Construct a simple linear guess
-      
-	if (npdrip==0.0) {
-	  for(int i=0;i<ngrid;i++) {
-	    ox[i]=((double)i)/((double)(ngrid-1));
-	    oy(i,0)=(nnrhs-nndrip)*(1.0-ox[i])+nndrip;
-	    oy(i,1)=-0.08*(1.0-ox[i]);
-	    oy(i,2)=0.001;
-	  }
-	} else {
-	  for(int i=0;i<ngrid;i++) {
-	    ox[i]=((double)i)/((double)(ngrid-1));
-	    oy(i,0)=(nprhs-npdrip)*(1.0-ox[i])+npdrip;
-	    oy(i,1)=-0.08*(1.0-ox[i]);
-	    oy(i,2)=0.001;
-	  }
-	}
-
-      } else {
-	
-	//----------------------------------------------
-	// Use last solution for guess
-      
-	for(int i=0;i<ngrid;i++) {
-	  ox[i]=xg2[i+1];
-	  for(int j=0;j<3;j++) {
-	    oy(i,j)=yg2[j+1][i+1];
-	  }
-	}
-
-      }
-
-      //----------------------------------------------
-      // Solve
-  
-      rhsmode=true;
-      cout << "second solve" << endl;
-
-      if (nndrip>0.0) {
-	cout << "Rhs length: " << rhslength << endl;
-	//int relret2=rel->solve(relaxconverge,1.0);
-	
-	while (-oy(ngrid-1,1)>1.0e-4) {
-	  rhslength*=1.2;
-
-	  cout << "Rhs length: " << rhslength << endl;
-	  //relret2=rel->solve(relaxconverge,1.0);
-	}
-      } else {
-	//int relret2=rel->solve(relaxconverge,1.0);
-      }
-    
-      //----------------------------------------------
-      // Copy solution for next guess
-
-      for(int i=1;i<=ngrid;i++) {
-	xg2[i]=ox(i-1);
-	for(int j=1;j<=n_eq;j++) {
-	  yg2[j][i]=oy(i-1,j-1);
-	}
-      }
-  
-      //----------------------------------------------
-      // Store solution and delete seminf_nr_relax
-
-      for(int i=1;i<=ngrid;i++) {
-	at.set(0,i+ngrid-2,ox(i-1));
-	for(int j=1;j<=3;j++) {
-	  at.set(j,i+ngrid-2,oy(i-1,j-1));
-	}
-      }
-      //delete rel;
-
-      //----------------------------------------------
-      // Rearrangment and rescaling
-  
-      if (npdrip==0.0) {
-	for(int i=ngrid-1;i<2*ngrid-1;i++) {
-	  at.set(5,i,at.get(3,i));
-	  at.set(4,i,0.0);
-	  at.set(3,i,at.get(2,i));
-	  at.set(2,i,0.0);
-	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
-	}
-      } else {
-	for(int i=1;i<=ngrid;i++) {
-	  at.set(5,i,at.get(3,i));
-	  at.set(4,i,at.get(2,i));
-	  at.set(3,i,0.0);
-	  at.set(2,i,at.get(1,i));
-	  at.set(1,i,0.0);
-	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
-	}
-      }
-      //    at.set_nlines(2*ngrid-1);
-    }
-    
-    return 0.0;
-  }
-  
-#ifdef NEVER_DEFINED
-  /** \brief Desc
-   */
-  double solve_qnn_equal_qnp(double lmonfact) {
-    bool guessdone, debug=false;
-    double dx, y[5], dydx[5], xrhs;
-    int ilast=0, interpi;
-    ofstream itout;
-    char ch;
-    ubvector sx(3), sy(3);
-    int n_eq=3, n_b=2;
-
-    monfact=lmonfact;
-
-    //----------------------------------------------
-    // Create object
-
-    rel=new seminf_nr_relax(3,2,ngrid);
-    rel->itmax=200;
-    rel->rp=&rp;
-
-    //----------------------------------------------
-    // Construct a guess by shooting
-
-    if (rp.pf_index==1) {
-      xstor[1]=0.0;
-      ystor(1,1)=rp.nn0+rp.np0;
-      ystor(2,1)=firstderiv;
-      dx=initialstep/((double)ngrid);
-    
-      guessdone=false;
-      for(int i=2;guessdone==false && i<=ngrid;i++) {
-	xstor[i]=xstor[i-1]+dx;
-      
-	sx[1]=(1.0-rp.protfrac)*ystor(1,i-1);
-	sx[2]=rp.protfrac*ystor(1,i-1);
-	rp.barn=ystor(1,i-1);
-	mm_funct11 qqf=std::bind
-	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
-	   (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
-	   std::placeholders::_2,std::placeholders::_3);
-	nd.msolve(2,sx,qqf);
-      
-	ystor(1,i)=ystor(1,i-1)+dx*ystor(2,i-1);
-	ystor(2,i)=ystor(2,i-1)+dx*(rp.n.mu-rp.mun)/(rp.qnn);
-      
-	if (sx[2]<nndrip+npdrip+1.0e-6 || ystor(2,i)>0.0) {
-	  guessdone=true;
-	  ilast=i-1;
-	  i=ngrid+10;
-	} else if (debug) {
-	  cout << i << " " << xstor[i] << " " << ystor(1,i) << " " 
-	       << ystor(2,i) << endl;
-	}
-      }
-    
-      //----------------------------------------------
-      // Stretch the solution to the grid ngrid
-    
-      rel->x[1]=xstor[1];
-      rel->x[ngrid]=xstor[ilast];
-      for(int i=2;i<ngrid;i++) {
-	rel->x[i]=rel->x[1]+((double)(i-1))/((double)(ngrid-1))*
-	  (rel->x[ngrid]-rel->x[1]);
-      }
-      interpi=1;
-      for(int i=1;i<=ngrid;i++) {
-	while(rel->x[i]>xstor[interpi+1] && interpi<ilast-1) interpi++;
-	while(rel->x[i]<xstor[interpi] && interpi>1) interpi--;
-	for(int j=1;j<=2;j++) {
-	  rel->y(j,i)=ystor(j,interpi)+
-	    (ystor(j,interpi+1)-ystor(j,interpi))*
-	    (rel->x[i]-xstor[interpi])/(xstor[interpi+1]-xstor[interpi]);
-	}
-	rel->y(3,i)=(rel->x[ngrid]);
-	rel->x[i]=((double)(i-1))/((double)(ngrid-1));
-      }
-
-    } else {
-
-      //----------------------------------------------
-      // Use last solution for guess
-    
-      for(int i=1;i<=ngrid;i++) {
-	rel->x[i]=xg1[i];
-	for(int j=1;j<=n_eq;j++) {
-	  rel->y(j,i)=yg1[j][i];
-	}
-      }
-    }
-
-    //----------------------------------------------
-    // Solve
-
-    rhsmode=false;
-    int relret1=rel->solve(relaxconverge,1.0);
-  
-    //----------------------------------------------
-    // Copy solution for next guess
-
-    for(int i=1;i<=ngrid;i++) {
-      xg1[i]=rel->x[i];
-      for(int j=1;j<=n_eq;j++) {
-	yg1[j][i]=rel->y(j,i);
-      }
-    }
-  
-    //----------------------------------------------
-    // Rescale solution and set neutron and proton
-    // densities:
-
-    at.set_nlines(ngrid);
-    for(int i=1;i<=rel->ngrid;i++) {
-
-      sx[1]=(1.0-rp.protfrac)*rel->y(1,i);
-      sx[2]=rp.protfrac*rel->y(1,i);
-
-      rp.barn=rel->y(1,i);
-      mm_funct11 qqf=std::bind
-	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
-	 (&seminf_nr::qnnqnpfun),snp,std::placeholders::_1,
-	 std::placeholders::_2,std::placeholders::_3);
-      nd.msolve(2,sx,qqf);
-
-      at.set(0,i-1,rel->x[i]*rel->y(3,i));
-      at.set(1,i-1,sx[1]);
-      at.set(2,i-1,sx[2]);
-      at.set(3,i-1,rel->y(2,i));
-      at.set(4,i-1,0.0);
-      at.set(5,i-1,rel->y(3,i));
-    }
-
-    //----------------------------------------------
-    // Store quantites at rhs for later use:
-  
-    xrhs=at[0][ngrid-1];
-    if (npdrip==0.0) {
-      nnrhs=at[1][ngrid-1];
-      cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
-      if (nnrhs<rhsmin) {
-	nnrhs=rhsmin;
-	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
-      }
-    } else {
-      nprhs=at[2][ngrid-1];
-      cout << "RHS, nprhs=" << nprhs << endl;
-      if (nprhs<rhsmin) {
-	nprhs=rhsmin;
-	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
-      }
-    }
-
-    //----------------------------------------------
-    // Delete seminf_nr_relax
-
-    delete rel;
-
-    //---------------------------------------------
-    // RHS
-    
-    if (fabs(rp.protfrac-0.5)>1.0e-4) {
-      rel=new seminf_nr_relax(3,1,ngrid);
-      rel->rp=&rp;
-    
-      if (rp.pf_index==1) {
-	//----------------------------------------------
-	// Construct a simple linear guess
-      
-	if (npdrip==0.0) {
-	  for(int i=1;i<=ngrid;i++) {
-	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
-	    rel->y(1,i)=(nnrhs-nndrip)*(1.0-rel->x[i])+nndrip;
-	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
-	    rel->y(3,i)=0.001;
-	  }
-	} else {
-	  for(int i=1;i<=ngrid;i++) {
-	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
-	    rel->y(1,i)=(nprhs-npdrip)*(1.0-rel->x[i])+npdrip;
-	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
-	    rel->y(3,i)=0.001;
-	  }
-	}
-      } else {
-	//----------------------------------------------
-	// Use last solution for guess
-      
-	for(int i=1;i<=ngrid;i++) {
-	  rel->x[i]=xg2[i];
-	  for(int j=1;j<=n_eq;j++) {
-	    rel->y(j,i)=yg2[j][i];
-	  }
-	}
-      
-      }
-    
-      //----------------------------------------------
-      // Solve
-    
-      rhsmode=true;
-      int relret2=rel->solve(relaxconverge,1.0);
-    
-      //----------------------------------------------
-      // Copy solution for next guess
-    
-      for(int i=1;i<=ngrid;i++) {
-	xg2[i]=rel->x[i];
-	for(int j=1;j<=n_eq;j++) {
-	  yg2[j][i]=rel->y(j,i);
-	}
-      }
-    
-      //----------------------------------------------
-      // Store solution, rescale, and delete seminf_nr_relax
-    
-      at.set_nlines(2*ngrid-1);
-      for(int i=1;i<=rel->ngrid;i++) {
-	at.set(5,i-2+ngrid,rel->y(3,i));
-	at.set(3,i-2+ngrid,rel->y(2,i));
-	at.set(4,i-2+ngrid,0.0);
-	at.set(2,i-2+ngrid,0.0);
-	at.set(1,i-2+ngrid,rel->y(1,i));
-	at.set(0,i-2+ngrid,rel->x[i]*rel->y(3,i)+xrhs);
-      }
-      delete rel;
-    }
-  
-    return 0.0;
-
-  }
-#endif
-  
-  /** \brief Desc
-   */
-  int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
-
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
-    if (sx[1]<0.0 || sx[2]<0.0) return 1;
-  
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-
-    sy[1]=rp.n.n+rp.p.n-rp.barn;
-    sy[2]=rp.n.mu-rp.p.mu-rp.mun+rp.mup;
-
-    return 0;
-  }
-
-  /** \brief Desc
-   */
-  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    double pleft, pright, munleft, munright;
-
-    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
-
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
-    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
-  
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pleft=rp.hb.pr;
-    munleft=rp.n.mu;
-
-    rp.n.n=sx[3];
-    rp.p.n=0.0;
-  
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pright=rp.hb.pr;
-    munright=rp.n.mu;
-
-    sy[2]=pleft-pright;
-    sy[3]=munleft-munright;
-
-    return 0;
-  }
-
-  /** \brief Desc
-   */
-  int pdripfun(size_t sn, const ubvector &sx, ubvector &sy) {
-    double pleft, pright, mupleft, mupright;
-
-    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
-
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
-    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
-  
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pleft=rp.hb.pr;
-    mupleft=rp.p.mu;
-
-    rp.n.n=0.0;
-    rp.p.n=sx[3];
-  
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pright=rp.hb.pr;
-    mupright=rp.p.mu;
-
-    sy[2]=pleft-pright;
-    sy[3]=mupleft-mupright;
-
-    return 0;
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
-    ubvector y2=y, dydx(5);
-#ifdef DEBUG
-    cout << "H2: " << y2(0) << " " << y2(1) << " " << y2(2) << " "
-	 << y2(3) << " " << y2(4) << endl;
-#endif
-    derivs2(x,y2,dydx);
-#ifdef DEBUG
-    cout << "J2: " << dydx(0) << " " << dydx(1) << " " << dydx(2) << " "
-	 << dydx(3) << " " << dydx(4) << endl;
-    char ch;
-    cin >> ch;
-#endif
-    if (ieq==0) {
-      //cout << "Cent1: " << dydx[0]*y[4] << " " << y[4] << endl;
-      return dydx[0]*y[4];
-    } else if (ieq==1) {
-      //cout << "Cent2: " << dydx[1]*y[4] << endl;
-      return dydx[1]*y[4];
-    } else if (ieq==2) {
-      //cout << "Cent3: " << dydx[2]*y[4] << endl;
-      return dydx[2]*y[4];
-    } else if (ieq==3) {
-      //cout << "Cent4: " << dydx[3]*y[4] << endl;
-      return dydx[3]*y[4];
-    }
-    //cout << "Cent5: " << 0.0 << endl;
-    //exit(-1);
-    return 0.0;
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double left2(size_t ieq, double x, ubmatrix_row &y) {
-    
-    double delta=rp.nn0*monfact/exp(big*expo);
-    double epsi=delta*(-rp.dmundn+rp.qnn*expo*expo)/
-      (rp.dmundp-rp.qnp*expo*expo);
-
-    if (epsi*delta<0.0) {
-      cout << "epsi and delta have different signs" << endl;
-      exit(-1);
-    }
-
-    /*
-      cout << y[0] << " " << y[1] << " " << y[2] << " " << y[3] << endl;
-      cout << rp.nn0 << " " << rp.np0 << " "
-      << delta << " " << epsi << " " << big << " "
-      << expo << endl;
-    */
-    
-    double ret;
-    if (ieq==0) {
-      ret=y[0]-(rp.nn0-delta*exp(big*expo));
-      //cout << "Left: " << ret << endl;
-    } else if (ieq==1) {
-      ret=y[1]-(rp.np0-epsi*exp(big*expo));
-      //cout << "Left: " << ret << endl;
-    } else if (ieq==2) {
-      ret=y[2]+delta*expo*exp(big*expo);
-      //cout << "Left: " << ret << endl;
-    } else {
-      ret=y[3]+epsi*expo*exp(big*expo);
-      //cout << "Left: " << ret << endl;
-    }
-    //cout << "I " << ieq << " " << ret << endl;
-    return ret;
-  }
-
-  /** \brief Future function for \ref o2scl::ode_it_solve
-   */
-  double right2(size_t ieq, double x, ubmatrix_row &y) {
-    return y[1];
   }
   
 };
