@@ -161,7 +161,6 @@ protected:
   /** \brief The grid size
    */
   int ngrid;
-  bool convergeflag;
   double nsat;
   double protfrac;
   /** \brief The current neutron chemical potential
@@ -317,21 +316,15 @@ public:
   /** \brief Main
    */
   int run(int argc, char *argv[]) {
-
+    
+    bool convergeflag;
     bool flattendone;
     bool summaryout=true;
     bool iterfile=false;
-    bool altsym;
     bool outputiter=true;
     bool debug=true;
     double conve=1.0e-10;
-    double slowc;
-    double jlint;
-    double senuc;
-    double surf;
     double protfrac=0.0;
-    double lamv;
-    double lam4;
     double xn[4];
     double xp[4];
     double fact=1.04;
@@ -344,68 +337,48 @@ public:
     double finalconverge=1.0e-12;
     double xcent;
     double derivlimit=0.04;
-    ubvector px(7);
-    double wd=0.0;
-    double wd2=0.0;
-    double w0=0.0;
-    ifstream fin; 
     int flattenit=70;
-    int sz;
-    int sz2;
     static const int ne=6, nb=3;
     int lastit;
     int npoints=64;
-    ofstream fout;
     ubvector xstor(ngrid);
     ubmatrix ystor(ne,ngrid);
 
-    double sssv1=0.0;
-    double sssv2=0.0;
-    double temp;
-    double qq;
-    double sig;
-    double ome;
-    double rhof;
-    double hns;
+    // Output quantities
+    double wd=0.0;
+    double wd2=0.0;
+    double w0=0.0;
     double wdjl=0.0;
-    double nint;
     double w0jl=0.0;
     double w02=0.0;
-    double nn1;
-    double np1;
-    double nn2;
-    double np2;
-    double hbarn;
-    double nn0;
-    double np0;
+    double sssv1=0.0;
+    double sssv2=0.0;
+    double thick=0.0;
+    double surf;
+    double surf2;
     double sbulk;
     double sgrad;
-    double surf2;
+    
+    double temp;
+    double nint;
     double f1;
     double f2;
     double f3;
-    double thick=0.0;
-    double n0half;
-    double sprotfrac=0.49;
-    double delta;
-    bool guessdone=false;
     double dx=7.0/((double)ngrid);
-    double fn;
-    double fn2;
-    double fn3;
     double xinterp;
     int ilast=0;
     int interp;
-    bool usehc;
-    string hcmodel;
 
     //--------------------------------------------
-    // Equation of state initializations
+    // Euqation solver
 
     mroot_hybrids<> nd;
     nd.tol_abs=1.0e-15;
     nd.tol_rel=1.0e-12;
     nd.ntrial=100;
+
+    //--------------------------------------------
+    // Equation of state and particle initializations
 
     rmf_load(rmf_eos,"RAPR");
     neutron.init(o2scl_settings.get_convert_units().convert
@@ -416,7 +389,7 @@ public:
     proton.non_interacting=false;
     
     //--------------------------------------------
-    // Initializations for relaxation class
+    // Initializations for ODE solver class
     
     ode_it_solve2 oit;
     ode_it_funct11 f_derivs=std::bind
@@ -438,20 +411,24 @@ public:
     if (outputiter) oit.verbose=1;
     else oit.verbose=0;
     
+    //--------------------------------------------
+    // Create output table
+
     table<> at(1000);
     at.line_of_names("x sigma omega rho sigmap omegap rhop ");
     at.line_of_names(((string)"nn np n alpha nprime esurf esurf2 ebulk ")+
 		     "egrad thickint wdint wd2int qpq ");
     at.set_nlines(ngrid);
   
-    slowc=1.0;
-    
+    //--------------------------------------------
+    // Main loop over requested proton fractions
+
     for(int pf_index=1;pf_index<=2;pf_index++) {
       
       if (pf_index==1) {
 	protfrac=0.5;
       } else {
-	protfrac=sprotfrac;
+	protfrac=0.49;
       }
 
       //--------------------------------------------
@@ -468,34 +445,33 @@ public:
     
       cout << "Saturation density at x=" << protfrac << ": "
 	   << nsat << endl;
-      
-      if (pf_index==1) n0half=nsat;
-      double rad0=cbrt(0.75/pi/n0half);
+
+      double rad0=0.0;
+      if (pf_index==1) rad0=cbrt(0.75/pi/nsat);
     
       mun=neutron.mu;
       mup=proton.mu;
-      nn0=neutron.n;
-      np0=proton.n;
+      double nn_left=neutron.n;
+      double np_left=proton.n;
 
+      // Neutron drip case. Not working.
       if (mun>neutron.m) {
 
 	protfrac=0.3;
 
+	ubvector px(3);
 	px[0]=0.07;
 	px[1]=0.07;
 	px[2]=0.04;
-
-	/*
-	  mm_funct11 mff=std::bind
+	
+	mm_funct11 mff=std::bind
 	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
-	  (&seminf_rel::ndripfun),this,std::placeholders::_1,
-	  std::placeholders::_2,std::placeholders::_3);
-	*/
-	mm_funct11 mff;
+	   (&seminf_rel::ndripfun),this,std::placeholders::_1,
+	   std::placeholders::_2,std::placeholders::_3);
 	cout << nd.msolve(3,px,mff) << endl;
 
 	cout << px[0] << " " << px[1] << " " << px[2] << endl;
-	cout << "Exiting." << endl;
+	cout << "Neutron drip case not working." << endl;
 	exit(-1);
       }
 
@@ -511,7 +487,7 @@ public:
       gr=rmf_eos.cr*rmf_eos.mr;
   
       //----------------------------------------------
-      // Construct guess
+      // Construct LHS for initial guess
       
       ox[0]=0.0;
       oy(0,0)=phi0;
@@ -523,13 +499,14 @@ public:
       else oy(0,5)=1.0e-4;
 	
       //----------------------------------------------
-      // Use simple integration
+      // Integrate to determine initial guess
 
       neutron.mu=mun;
       proton.mu=mup;
       neutron.n=0.08;
       proton.n=0.08;
 
+      bool guessdone=false;
       for(int i=1;i<ngrid;i++) {
 	ox[i]=ox[i-1]+dx;
 
@@ -540,14 +517,14 @@ public:
 	  neutron.mu=mun;
 	  proton.mu=mup;
 	  rmf_eos.calc_eq_p(neutron,proton,oy(i-1,0),oy(i-1,1),
-			    oy(i-1,2),fn,fn2,fn3,hb);
+			    oy(i-1,2),f1,f2,f3,hb);
       
 	  oy(i,0)=oy(i-1,0)+dx*oy(i-1,3);
 	  oy(i,1)=oy(i-1,1)+dx*oy(i-1,4);
 	  oy(i,2)=oy(i-1,2)+dx*oy(i-1,5);
-	  oy(i,3)=oy(i-1,3)+dx*fn;
-	  oy(i,4)=oy(i-1,4)+dx*fn2;
-	  oy(i,5)=oy(i-1,5)+dx*fn3;
+	  oy(i,3)=oy(i-1,3)+dx*f1;
+	  oy(i,4)=oy(i-1,4)+dx*f2;
+	  oy(i,5)=oy(i-1,5)+dx*f3;
 
 	  if (oy(i,0)<0.0 || oy(i,1)<0.0) {
 	    guessdone=true;
@@ -559,11 +536,10 @@ public:
 	}
       }
 
-      //----------------------------------------------
-      // Stretch the solution over the entire grid
-      // Start at the RHS, so that we can overwrite
-      // the original data. This works until we get
-      // to the left hand side, where we adjust accordingly
+      //--------------------------------------------------------------
+      // Stretch the solution over the entire grid. Start at the RHS,
+      // so that we can overwrite the original data. This works until
+      // we get to the left hand side, where we adjust accordingly
 	
       ilast=18;
       for(int i=ngrid-1;i>=0;i--) {
@@ -670,7 +646,6 @@ public:
       //--------------------------------------------
       // Output characteristics of final solution
 
-      cout << "XX" << endl;
       for(int i=0;i<ngrid;i++) {
 	at.set("x",i,ox[i]);
 	at.set("sigma",i,oy(i,0));
@@ -680,21 +655,15 @@ public:
 	at.set("omegap",i,oy(i,4));
 	at.set("rhop",i,oy(i,5));
       }
-      cout << "XX" << endl;
-	
-      //double *ebulklam;
-      //double *rhoprime;
-      //double *qpq;
       
       //--------------------------------------------
       // Calculate rhon, rhop, energy, and ebulk at
       // every point in profile
     
-      hns=rmf_eos.fesym(nsat,protfrac);
-      delta=1.0-2.0*protfrac;
+      double hns=rmf_eos.fesym(nsat,protfrac);
+      double delta=1.0-2.0*protfrac;
     
       for(int i=0;i<ngrid;i++) {
-	cout << "YY " << i << endl;
 	mstar=rmf_eos.mnuc-gs*oy(i,0);
     
 	if (mun-gw*oy(i,1)+gr*oy(i,2)/2.0<mstar) {
@@ -719,7 +688,7 @@ public:
 	proton.ms=mstar;
 	neutron.nu=sqrt(kfn*kfn+neutron.ms*neutron.ms);
 	proton.nu=sqrt(kfp*kfp+proton.ms*proton.ms);
-	rmf_eos.calc_eq_p(neutron,proton,oy(0,i),oy(i,1),
+	rmf_eos.calc_eq_p(neutron,proton,oy(i,0),oy(i,1),
 			  oy(i,2),f1,f2,f3,hb);
 	hb.ed=-hb.pr+neutron.n*neutron.mu+proton.n*proton.mu;
 
@@ -759,7 +728,7 @@ public:
 	  at.set("qpq",i,0.0);
 	}
 
-	at.set("thickint",i,(at.get("nn",i)/nn0-at.get("np",i)/np0));
+	at.set("thickint",i,(at.get("nn",i)/nn_left-at.get("np",i)/np_left));
       
 	if (pf_index>=2) {
 	  at.set("wdint",i,at.get("alpha",i)/delta-at.get("n",i));
@@ -850,10 +819,10 @@ public:
 	
 	  neutron.n=lookup(ngrid,nint,rhon,rho);
 	  proton.n=lookup(ngrid,nint,rhop,rho);
-	  sig=lookup(ngrid,nint,ar1,rho);
-	  ome=lookup(ngrid,nint,ar2,rho);
-	  rhof=lookup(ngrid,nint,ar3,rho);
-	  qq=lookup(ngrid,nint,qpq,rho);
+	  double sig=lookup(ngrid,nint,ar1,rho);
+	  double ome=lookup(ngrid,nint,ar2,rho);
+	  double rhof=lookup(ngrid,nint,ar3,rho);
+	  double qq=lookup(ngrid,nint,qpq,rho);
 
 	  neutron.kffromden();
 	  proton.kffromden();
