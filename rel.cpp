@@ -64,7 +64,7 @@ using namespace o2scl_const;
     + 2 g_{\rho}^2 \rho f + \frac{\xi}{6} g_{\rho}^4 \rho^3
     \f}
     in the same notation as \ref o2scl::eos_had_rmf .
-
+    
     \note wd2int() is broken since fesym() tends to fail at low
     densities. For this reason, it wasn't used in \ref Steiner05ia .
 */
@@ -560,7 +560,7 @@ public:
 	at.set("np",i,proton.n);
 	at.set("n",i,at.get("nn",i)+at.get("np",i));
 	at.set("alpha",i,at.get("nn",i)-at.get("np",i));
-
+	
 	at.set("ebulk",i,hb.ed-mup*at.get("np",i)-mun*at.get("nn",i));
 	at.set("egrad",i,0.5*(oy(i,3)*oy(i,3)-oy(i,4)*oy(i,4)-
 			      oy(i,5)*oy(i,5)));

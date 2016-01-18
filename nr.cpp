@@ -300,7 +300,7 @@ protected:
     return 0;
   }
 
-  /** \brief Desc
+  /** \brief Solve the ODEs when \f$ Q_{nn} = Q_{np} \f$ 
    */
   double solve_qnn_neq_qnp(double lmonfact, int argc) {
     bool guessdone;
@@ -308,8 +308,6 @@ protected:
     double dx, xrhs, delta, epsi;
     ubvector y(5), dydx(5);
     int ilast=0, interpi;
-    ofstream itout;
-    char ch;
     int n_eq=5, n_b;
     ubvector ox(ngrid);
     ubmatrix oy(ngrid,n_eq);
@@ -368,7 +366,9 @@ protected:
 	  y[j]=ystor(j+1,i-1);
 	}
 	derivs(xstor[i-1],y,dydx);
-	for(int j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
+	for(int j=1;j<=4;j++) {
+	  ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
+	}
       
 	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
 	  guessdone=true;
@@ -667,8 +667,6 @@ protected:
     bool guessdone, debug=false;
     double dx, y[5], dydx[5], xrhs;
     int ilast=0, interpi;
-    ofstream itout;
-    char ch;
     ubvector sx(3), sy(3);
     int n_eq=3, n_b=2;
 

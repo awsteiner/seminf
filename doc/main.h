@@ -20,7 +20,21 @@
     \ref seminf_nr) and RMF model RAPR (see \ref seminf_rel), but
     still needs quite a bit of work.
     
-    Originally written for \ref Steiner05ia .
+    The surface tension (surface energy per unit area) is
+    \f[
+    \omega \equiv \int~dz \left[ \varepsilon(z) - 
+    \mu_n n_n(z) - \mu_p n_p(z) \right]
+    \f]
+    where \f$ \varepsilon(z) \f$ is the full energy density including
+    the contributions from gradient terms and the neutron and proton
+    chemical potentials are independent of \f$ z \f$. It is often
+    useful to expand the surface tension in terms of the isospin
+    asymmetry of the dense phase (the LHS)
+    \f[
+    \omega(\delta) = \omega_0 + \delta^2 \omega_{\delta}
+    \f]
+
+    This code was originally written for \ref Steiner05ia .
     
     \anchor Steiner05ia Steiner05ia:
     <a href="http://dx.doi.org/10.1016/j.physrep.2005.02.004">A.W. 
