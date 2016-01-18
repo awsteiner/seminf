@@ -64,6 +64,11 @@ using namespace o2scl_const;
     + 2 g_{\rho}^2 \rho f + \frac{\xi}{6} g_{\rho}^4 \rho^3
     \f}
     in the same notation as \ref o2scl::eos_had_rmf .
+
+    The algorithm works by solving first over a small interval in
+    coordinate space and slowly spreading the solution out until the
+    derivatives of the meson fields at the left boundary drop below a
+    specified tolerance.
     
     \note wd2int() is broken since fesym() tends to fail at low
     densities. For this reason, it wasn't used in \ref Steiner05ia .
@@ -253,7 +258,7 @@ public:
     //--------------------------------------------
     // Initializations for ODE solver
     
-    ode_it_solve2 oit;
+    ode_it_solve<> oit;
     ode_it_funct11 f_derivs=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
        (&seminf_rel::difeq),this,std::placeholders::_1,

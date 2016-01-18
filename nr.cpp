@@ -48,14 +48,15 @@ using namespace o2scl;
 using namespace o2scl_const;
 using namespace o2scl_hdf;
 
-//--------------------------------------------
-// Global variables
-
-static const double big=3.0;
-static const int ngrid=100;
-
 /** \brief Semi-infinite nuclear matter for nonrelativistic
     models in the Thomas-Fermi approximation
+
+    In neutron-rich matter, the proton density vanishes while the
+    neutron density extends out to \f$ z \rightarrow \infty \f$. In
+    order to handle this, the algorithm separates the solution into
+    two intervals: the first where the proton density is non-zero, and
+    the second where the proton density is zero. These two solutions
+    are then pasted together to create the final table.
     
     \warning Does not work with dripped nucleons yet.
     
@@ -151,6 +152,13 @@ protected:
   /// Initial derivative for densities on LHS (typically negative)
   double firstderiv;
 
+  /** \brief Desc
+   */
+  double big;
+  /** \brief The grid size
+   */
+  int ngrid;
+
   /// \name Desc
   //@{
   ubvector xstor;
@@ -159,10 +167,10 @@ protected:
   
   /// \name Desc
   //@{
-  double xg1[ngrid+1];
-  double xg2[ngrid+1];
-  double yg1[6][ngrid+1];
-  double yg2[6][ngrid+1];
+  ubvector xg1;
+  ubvector xg2;
+  ubmatrix yg1;
+  ubmatrix yg2;
   //@}
 
   /** \brief Desc
@@ -335,7 +343,7 @@ protected:
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
        (&seminf_nr::right),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);   
-    ode_it_solve2 oit;
+    ode_it_solve<> oit;
     ubmatrix A(ngrid*n_eq,ngrid*n_eq);
     ubvector rhs(ngrid*n_eq),dy(ngrid*n_eq);
     
@@ -417,7 +425,7 @@ protected:
       for(int i=0;i<ngrid;i++) {
 	ox[i]=xg1[i+1];
 	for(int j=0;j<n_eq;j++) {
-	  oy(i,j)=yg1[j+1][i+1];
+	  oy(i,j)=yg1(j+1,i+1);
 	}
       }
 
@@ -469,7 +477,7 @@ protected:
     for(int i=1;i<=ngrid;i++) {
       xg1[i]=ox(i-1);
       for(int j=1;j<=n_eq;j++) {
-	yg1[j][i]=oy(i-1,j-1);
+	yg1(j,i)=oy(i-1,j-1);
       }
     }
   
@@ -547,7 +555,7 @@ protected:
 	for(int i=0;i<ngrid;i++) {
 	  ox[i]=xg2[i+1];
 	  for(int j=0;j<3;j++) {
-	    oy(i,j)=yg2[j+1][i+1];
+	    oy(i,j)=yg2(j+1,i+1);
 	  }
 	}
 
@@ -603,7 +611,7 @@ protected:
       for(int i=1;i<=ngrid;i++) {
 	xg2[i]=ox(i-1);
 	for(int j=1;j<=n_eq;j++) {
-	  yg2[j][i]=oy(i-1,j-1);
+	  yg2(j,i)=oy(i-1,j-1);
 	}
       }
   
@@ -744,7 +752,7 @@ protected:
       for(int i=1;i<=ngrid;i++) {
 	rel->x[i]=xg1[i];
 	for(int j=1;j<=n_eq;j++) {
-	  rel->y(j,i)=yg1[j][i];
+	  rel->y(j,i)=yg1(j,i);
 	}
       }
     }
@@ -761,7 +769,7 @@ protected:
     for(int i=1;i<=ngrid;i++) {
       xg1[i]=rel->x[i];
       for(int j=1;j<=n_eq;j++) {
-	yg1[j][i]=rel->y(j,i);
+	yg1(j,i)=rel->y(j,i);
       }
     }
   
@@ -848,7 +856,7 @@ protected:
 	for(int i=1;i<=ngrid;i++) {
 	  rel->x[i]=xg2[i];
 	  for(int j=1;j<=n_eq;j++) {
-	    rel->y(j,i)=yg2[j][i];
+	    rel->y(j,i)=yg2(j,i);
 	  }
 	}
       
@@ -866,7 +874,7 @@ protected:
       for(int i=1;i<=ngrid;i++) {
 	xg2[i]=rel->x[i];
 	for(int j=1;j<=n_eq;j++) {
-	  yg2[j][i]=rel->y(j,i);
+	  yg2(j,i)=rel->y(j,i);
 	}
       }
     
@@ -1047,6 +1055,12 @@ public:
   
   seminf_nr() {
     rhslength=2.0;
+    big=3.0;
+    ngrid=100;
+    xg1.resize(ngrid+1);
+    xg2.resize(ngrid+1);
+    yg1.resize(6,ngrid+1);
+    yg2.resize(6,ngrid+1);
   }
 
   //--------------------------------------------
