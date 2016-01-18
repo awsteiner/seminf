@@ -54,18 +54,36 @@ using namespace o2scl_hdf;
 static const double big=3.0;
 static const int ngrid=100;
 
-/** \brief Structure for relax parameters
- */
-class relaxp {
-
-public:
-
+/** \brief Semi-infinite nuclear matter for nonrelativistic
+    models in the Thomas-Fermi approximation
+    
+    \warning Does not work with dripped nucleons yet.
+    
+    \note The first proton fraction cannot be 0.5, as the 
+    algorithm cannot handle later values different from 0.5
+    
+    12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
+    nndrip becomes > 0. It seems that in this case, it is better not
+    to automatically adjust the scale of the x-axis, but use a gradual
+    broadening similar to what we have done using the relativistic
+    code. This allows calculation down to really low proton fractions!
+    We need to see if this is consistent with the analytic code for
+    both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
+*/
+class seminf_nr {
+  
+protected:
+  
   /// Neutron chemical potential
   double mun;
   /// Proton chemical potential
   double mup;
-  double nn0;
-  double np0;
+  /** \brief Neutron number density on the LHS
+   */
+  double nn_left;
+  /** \brief Proton number density on the LHS
+   */
+  double np_left;
   /// Isoscalar gradient term for neutrons
   double qnn;
   /// Isoscalar gradient term for protons
@@ -74,21 +92,17 @@ public:
   double qnp;
   /// Saturation density of isospin-symmetric matter
   double n0half;
+  /** \brief Desc
+   */
   bool showrelax;
-  double dndnl;
-  double dndnr;
-  double dndpl;
-  double dndpr;
-  double dpdnl;
-  double dpdnr;
-  double dpdpl;
-  double dpdpr;
-  double lex1;
-  double lex2;
-  double rex1;
-  double rex2;
+  /** \brief Desc
+   */
   double barn;
+  /** \brief Desc
+   */
   double dmundn;
+  /** \brief Desc
+   */
   double dmundp;
   /// Saturation density of matter with current proton fraction
   double nsat;
@@ -99,36 +113,12 @@ public:
   /// EOS pointer
   eos_had_base *eos;
   /// Neutron
-  fermion n;
+  fermion neutron;
   /// Proton
-  fermion p;
+  fermion proton;
   /// Thermodynamic functions
   thermo hb;
-};
 
-/** \brief Semi-infinite nuclear matter for nonrelativistic
-    models in the Thomas-Fermi approximation
-    
-    \warning This code is very preliminary, and needs quite a bit of
-    work.
-    
-    \warning Does not work with dripped protons yet.
-    
-    \note The first proton fraction cannot be 0.5, as the 
-    algorithm cannot handle later values different from 0.5
-    
-    12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
-    nndrip becomes > 0. It seems that in this case, it is better not to
-    automatically adjust the scale of the x-axis, but use a gradual
-    broadening similar to what we have done using the relativistic
-    code. This allows calculation down to really low proton fractions!
-    We need to see if this is consistent with the analytic code for
-    both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
-*/
-class seminf_nr {
-  
-protected:
-  
   /// If true, output relaxation iterations (default false)
   bool relaxfile;
   /// If true, \f$ Q_{nn}=Q_{np} \f$
@@ -160,16 +150,26 @@ protected:
   bool goodbound;
   /// Initial derivative for densities on LHS (typically negative)
   double firstderiv;
-  
+
+  /// \name Desc
+  //@{
   ubvector xstor;
   ubmatrix ystor;
+  //@}
+  
+  /// \name Desc
+  //@{
   double xg1[ngrid+1];
   double xg2[ngrid+1];
   double yg1[6][ngrid+1];
   double yg2[6][ngrid+1];
-  double nnprhs;
-  double npprhs;
+  //@}
+
+  /** \brief Desc
+   */
   double relaxconverge;
+  /** \brief Desc
+   */
   double rhsmin;
   /** \brief The step size factor for constructing the initial 
       guess (default 7.0)
@@ -181,7 +181,7 @@ protected:
   inte_qagiu_gsl<> gl2;
   /// Store the solution
   table<> at;
-  /// \name Interactions to use
+  /// \name Nucleon-nucleon interactions
   //@{
   eos_had_apr eosa;
   eos_had_potential eosg;
@@ -190,29 +190,28 @@ protected:
   //@}
   /// To compute derivatives
   deriv_gsl<> df;
-  relaxp rp;
   
   /** \brief Desc
    */
-  int derivs2(double sx, const ubvector &sy, ubvector &dydx) {
+  int derivs(double sx, const ubvector &sy, ubvector &dydx) {
     double rhsn, rhsp=0.0, det;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
 
-    rp.n.n=sy[0];
-    rp.p.n=sy[1];
+    neutron.n=sy[0];
+    proton.n=sy[1];
     if (model=="apr") {
-      eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+      eosa.gradient_qij2(neutron.n,proton.n,qnn,qnp,qpp,
+			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
     }
     if (model=="gp") {
       thermo thth;
       if (false) {
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth,qnn,qnp,qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
       } else {
-	rp.qnn=100.0/hc_mev_fm;
-	rp.qpp=100.0/hc_mev_fm;
-	rp.qnp=90.0/hc_mev_fm;
+	qnn=100.0/hc_mev_fm;
+	qpp=100.0/hc_mev_fm;
+	qnp=90.0/hc_mev_fm;
 	dqnndnn=0.0;
 	dqnndnp=0.0;
 	dqnpdnn=0.0;
@@ -222,10 +221,10 @@ protected:
       }
     }
 
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    eos->calc_e(neutron,proton,hb);
 
-    if (rp.n.n<=0.0) {
-      if (rp.p.n<=0.0) {
+    if (neutron.n<=0.0) {
+      if (proton.n<=0.0) {
 	dydx[0]=0.0;
 	dydx[1]=0.0;
 	dydx[2]=0.0;
@@ -235,47 +234,47 @@ protected:
 	dydx[1]=sy[3];
 	dydx[2]=0.0;
 	if (model!="apr" && model!="gp") {
-	  dydx[3]=(rp.p.mu-rp.mup)/rp.qpp;
+	  dydx[3]=(proton.mu-mup)/ qpp;
 	} else {
-	  dydx[3]=(rp.p.mu-rp.mup+0.5*dqppdnp*sy[3]*sy[3])/rp.qpp;
+	  dydx[3]=(proton.mu-mup+0.5*dqppdnp*sy[3]*sy[3])/ qpp;
 	}
       }
-    } else if (rp.p.n<=0.0) {
+    } else if (proton.n<=0.0) {
       dydx[0]=sy[2];
       dydx[1]=0.0;
       if (model!="apr" && model!="gp") {
-	dydx[2]=(rp.n.mu-rp.mun)/rp.qnn;
+	dydx[2]=(neutron.mu-mun)/ qnn;
       } else {
-	dydx[2]=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+	dydx[2]=(neutron.mu-mun+0.5*dqnndnn*sy[2]*sy[2])/ qnn;
       }
       dydx[3]=0.0;
     } else {
       if (rhsmode==false) {
 	if (model!="apr" && model!="gp") {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	  det=qnn*qpp-qnp*qnp;
+	  rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	  rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	  rhsn/=det;
 	  rhsp/=det;
 	} else {
-	  det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
-	  rhsn=(rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-		dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qpp-
-	    (rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-	     dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnp;
-	  rhsp=(rp.p.mu-rp.mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-		dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*rp.qnn-
-	    (rp.n.mu-rp.mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-	     dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*rp.qnp;
+	  det=qnn*qpp-qnp*qnp;
+	  rhsn=(neutron.mu-mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+		 dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qpp-
+	    (proton.mu-mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+	      dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnp;
+	  rhsp=(proton.mu-mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
+		 dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnn-
+	    (neutron.mu-mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
+	      dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qnp;
 	  rhsn/=det;
 	  rhsp/=det;
 	}
       } else {
 	if (model!="apr" && model!="gp") {
-	  rhsn=(rp.n.mu-rp.mun)/rp.qnn;
+	  rhsn=(neutron.mu-mun)/ qnn;
 	  rhsp=0.0;
 	} else {
-	  rhsn=(rp.n.mu-rp.mun+0.5*dqnndnn*sy[2]*sy[2])/rp.qnn;
+	  rhsn=(neutron.mu-mun+0.5*dqnndnn*sy[2]*sy[2])/ qnn;
 	  rhsp=0.0;
 	}
       }
@@ -321,39 +320,35 @@ protected:
     // Create object
 
     if (flatden) {
-      //rel=new seminf_nr_relax(5,3,ngrid);
       n_b=3;
     } else {
-      //rel=new seminf_nr_relax(5,4,ngrid);
       n_b=4;
     }
-    //rel->itmax=100;
-    //rel->rp=&rp;
     
     ode_it_funct11 f_derivs=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_nr::difeq2),this,std::placeholders::_1,std::placeholders::_2,
+       (&seminf_nr::difeq),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);       
     ode_it_funct11 f_left=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_nr::left2),this,std::placeholders::_1,std::placeholders::_2,
+       (&seminf_nr::left),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);       
     ode_it_funct11 f_right=std::bind
       (std::mem_fn<double(size_t,double,ubmatrix_row &)>
-       (&seminf_nr::right2),this,std::placeholders::_1,std::placeholders::_2,
+       (&seminf_nr::right),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);   
     ode_it_solve2 oit;
     ubmatrix A(ngrid*n_eq,ngrid*n_eq);
-    ubvector rhs(ngrid*n_eq), dy(ngrid*n_eq);
+    ubvector rhs(ngrid*n_eq),dy(ngrid*n_eq);
     
-    if (rp.pf_index==1) {
+    if (pf_index==1) {
 
       //----------------------------------------------
       // Construct a guess by shooting
-    
+
       xstor[1]=0.0;
-      ystor(1,1)=rp.nn0;
-      ystor(2,1)=rp.np0;
+      ystor(1,1)=nn_left;
+      ystor(2,1)=np_left;
       ystor(3,1)=firstderiv;
       ystor(4,1)=firstderiv;
       dx=initialstep/((double)ngrid);
@@ -372,7 +367,7 @@ protected:
 	for(int j=0;j<4;j++) {
 	  y[j]=ystor(j+1,i-1);
 	}
-	derivs2(xstor[i-1],y,dydx);
+	derivs(xstor[i-1],y,dydx);
 	for(int j=1;j<=4;j++) ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
       
 	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
@@ -433,28 +428,7 @@ protected:
 
     rhsmode=false;
 
-    if (true || argc>=2) {
-      /*
-	for(int i=1;i<=ngrid;i++) {
-	ox[i-1]=rel->x[i];
-	for(int j=1;j<=n_eq;j++) {
-	oy(i-1,j-1)=rel->y(j,i);
-	}
-	}
-      */
-      for(int i=0;i<ngrid;i+=9) {
-	cout.precision(4);
-	cout.width(3);
-	cout << i << " " << ox[i] << " ";
-	for(int j=0;j<5;j++) {
-	  cout << oy(i,j) << " ";
-	}
-	cout << endl;
-	cout.precision(6);
-      }
-      oit.verbose=1;
-      oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
-		A,rhs,dy);
+    if (debug>0) {
       for(int i=0;i<ngrid;i+=9) {
 	cout.precision(4);
 	cout.width(3);
@@ -470,8 +444,25 @@ protected:
     //----------------------------------------------
     // Solve
 
-    //int relret1=rel->solve(relaxconverge,1.0);
-  
+    oit.tol_rel=relaxconverge;
+    oit.verbose=1;
+    oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
+	      A,rhs,dy);
+
+    if (debug>0) {
+      for(int i=0;i<ngrid;i+=9) {
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " " << ox[i] << " ";
+	for(int j=0;j<5;j++) {
+	  cout << oy(i,j) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+      }
+    }
+    
+
     //----------------------------------------------
     // Copy solution for next guess
 
@@ -519,20 +510,16 @@ protected:
 	at.set(j+1,i,oy(i,j));
       }
     }
-    //delete rel;
 
     //----------------------------------------------
     // RHS
     
-    if (fabs(rp.protfrac-0.5)>1.0e-4) {
+    if (fabs(protfrac-0.5)>1.0e-4) {
 
       at.set_nlines(ngrid*2-1);
 
-      //rel=new seminf_nr_relax(3,1,ngrid);
-      //rel->itmax=100;
-      //rel->rp=&rp;
+      if (pf_index==1) {
 
-      if (rp.pf_index==1) {
 	//----------------------------------------------
 	// Construct a simple linear guess
       
@@ -572,46 +559,42 @@ protected:
       n_eq=3;
       n_b=1;
 
-      for(int i=0;i<ngrid;i+=9) {
-	cout.precision(4);
-	cout.width(3);
-	cout << i << " " << ox[i] << " ";
-	for(int j=0;j<3;j++) {
-	  cout << oy(i,j) << " ";
+      if (debug>0) {
+	for(int i=0;i<ngrid;i+=9) {
+	  cout.precision(4);
+	  cout.width(3);
+	  cout << i << " " << ox[i] << " ";
+	  for(int j=0;j<3;j++) {
+	    cout << oy(i,j) << " ";
+	  }
+	  cout << endl;
+	  cout.precision(6);
 	}
-	cout << endl;
-	cout.precision(6);
       }
       
       rhsmode=true;
       cout << "second solve: " << nndrip << endl;
-
+      
       if (nndrip>0.0) {
-	cout << "Rhs length: " << rhslength << endl;
-	//int relret2=rel->solve(relaxconverge,1.0);
-	
-	while (-oy(ngrid-1,1)>1.0e-4) {
-	  rhslength*=1.2;
-
-	  cout << "Rhs length: " << rhslength << endl;
-	  //relret2=rel->solve(relaxconverge,1.0);
-	}
+	O2SCL_ERR("Neutron drip not yet supported.",exc_eunimpl);
       } else {
+	oit.tol_rel=relaxconverge;
 	oit.verbose=1;
 	oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
 		  A,rhs,dy);
-	//int relret2=rel->solve(relaxconverge,1.0);
       }
-    
-      for(int i=0;i<ngrid;i+=9) {
-	cout.precision(4);
-	cout.width(3);
-	cout << i << " " << ox[i] << " ";
-	for(int j=0;j<3;j++) {
-	  cout << oy(i,j) << " ";
+
+      if (debug>0) {
+	for(int i=0;i<ngrid;i+=9) {
+	  cout.precision(4);
+	  cout.width(3);
+	  cout << i << " " << ox[i] << " ";
+	  for(int j=0;j<3;j++) {
+	    cout << oy(i,j) << " ";
+	  }
+	  cout << endl;
+	  cout.precision(6);
 	}
-	cout << endl;
-	cout.precision(6);
       }
 
       //----------------------------------------------
@@ -638,7 +621,6 @@ protected:
       //----------------------------------------------
       // Rearrangment and rescaling
 
-      cout << npdrip << endl;
       if (npdrip==0.0) {
 	for(int i=ngrid-1;i<2*ngrid-1;i++) {
 	  at.set(5,i,at.get(3,i));
@@ -659,18 +641,20 @@ protected:
       }
       //    at.set_nlines(2*ngrid-1);
     }
-    
-    for(int i=0;i<2*ngrid-1;i+=9) {
-      if (i==108) i-=8;
-      cout.precision(4);
-      cout.width(3);
-      cout << i << " ";
-      for(int j=0;j<6;j++) {
-	cout << at.get(j,i) << " ";
+
+    if (debug>0) {
+      for(int i=0;i<2*ngrid-1;i+=9) {
+	if (i==108) i-=8;
+	cout.precision(4);
+	cout.width(3);
+	cout << i << " ";
+	for(int j=0;j<6;j++) {
+	  cout << at.get(j,i) << " ";
+	}
+	cout << endl;
+	cout.precision(6);
+	if (i==190) i--;
       }
-      cout << endl;
-      cout.precision(6);
-      if (i==190) i--;
     }
 
     return 0.0;
@@ -700,9 +684,9 @@ protected:
     //----------------------------------------------
     // Construct a guess by shooting
 
-    if (rp.pf_index==1) {
+    if (pf_index==1) {
       xstor[1]=0.0;
-      ystor(1,1)=rp.nn0+rp.np0;
+      ystor(1,1)=nn_left+np_left;
       ystor(2,1)=firstderiv;
       dx=initialstep/((double)ngrid);
     
@@ -710,9 +694,9 @@ protected:
       for(int i=2;guessdone==false && i<=ngrid;i++) {
 	xstor[i]=xstor[i-1]+dx;
       
-	sx[1]=(1.0-rp.protfrac)*ystor(1,i-1);
-	sx[2]=rp.protfrac*ystor(1,i-1);
-	rp.barn=ystor(1,i-1);
+	sx[1]=(1.0-protfrac)*ystor(1,i-1);
+	sx[2]=protfrac*ystor(1,i-1);
+	barn=ystor(1,i-1);
 	mm_funct11 qqf=std::bind
 	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
 	   (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
@@ -720,7 +704,7 @@ protected:
 	nd.msolve(2,sx,qqf);
       
 	ystor(1,i)=ystor(1,i-1)+dx*ystor(2,i-1);
-	ystor(2,i)=ystor(2,i-1)+dx*(rp.n.mu-rp.mun)/(rp.qnn);
+	ystor(2,i)=ystor(2,i-1)+dx*(neutron.mu-mun)/(qnn);
       
 	if (sx[2]<nndrip+npdrip+1.0e-6 || ystor(2,i)>0.0) {
 	  guessdone=true;
@@ -790,10 +774,10 @@ protected:
     at.set_nlines(ngrid);
     for(int i=1;i<=rel->ngrid;i++) {
 
-      sx[1]=(1.0-rp.protfrac)*rel->y(1,i);
-      sx[2]=rp.protfrac*rel->y(1,i);
+      sx[1]=(1.0-protfrac)*rel->y(1,i);
+      sx[2]=protfrac*rel->y(1,i);
 
-      rp.barn=rel->y(1,i);
+      barn=rel->y(1,i);
       mm_funct11 qqf=std::bind
 	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
 	 (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
@@ -836,11 +820,11 @@ protected:
     //---------------------------------------------
     // RHS
     
-    if (fabs(rp.protfrac-0.5)>1.0e-4) {
+    if (fabs(protfrac-0.5)>1.0e-4) {
       rel=new seminf_nr_relax(3,1,ngrid);
       rel->rp=&rp;
     
-      if (rp.pf_index==1) {
+      if (pf_index==1) {
 	//----------------------------------------------
 	// Construct a simple linear guess
       
@@ -880,7 +864,7 @@ protected:
     
       //----------------------------------------------
       // Copy solution for next guess
-    
+      
       for(int i=1;i<=ngrid;i++) {
 	xg2[i]=rel->x[i];
 	for(int j=1;j<=n_eq;j++) {
@@ -912,14 +896,14 @@ protected:
    */
   int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
 
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
+    neutron.n=sx[1];
+    proton.n=sx[2];
     if (sx[1]<0.0 || sx[2]<0.0) return 1;
   
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
+    eos->calc_e(neutron,proton,hb);
 
-    sy[1]=rp.n.n+rp.p.n-rp.barn;
-    sy[2]=rp.n.mu-rp.p.mu-rp.mun+rp.mup;
+    sy[1]=neutron.n+proton.n-barn;
+    sy[2]=neutron.mu-proton.mu-mun+mup;
 
     return 0;
   }
@@ -931,20 +915,20 @@ protected:
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
 
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
-    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
+    neutron.n=sx[1];
+    proton.n=sx[2];
+    sy[1]=proton.n-protfrac*(proton.n+neutron.n);
   
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pleft=rp.hb.pr;
-    munleft=rp.n.mu;
+    eos->calc_e(neutron,proton,hb);
+    pleft=hb.pr;
+    munleft=neutron.mu;
 
-    rp.n.n=sx[3];
-    rp.p.n=0.0;
+    neutron.n=sx[3];
+    proton.n=0.0;
   
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pright=rp.hb.pr;
-    munright=rp.n.mu;
+    eos->calc_e(neutron,proton,hb);
+    pright=hb.pr;
+    munright=neutron.mu;
 
     sy[2]=pleft-pright;
     sy[3]=munleft-munright;
@@ -959,20 +943,20 @@ protected:
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
 
-    rp.n.n=sx[1];
-    rp.p.n=sx[2];
-    sy[1]=rp.p.n-rp.protfrac*(rp.p.n+rp.n.n);
+    neutron.n=sx[1];
+    proton.n=sx[2];
+    sy[1]=proton.n-protfrac*(proton.n+neutron.n);
   
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pleft=rp.hb.pr;
-    mupleft=rp.p.mu;
+    eos->calc_e(neutron,proton,hb);
+    pleft=hb.pr;
+    mupleft=proton.mu;
 
-    rp.n.n=0.0;
-    rp.p.n=sx[3];
+    neutron.n=0.0;
+    proton.n=sx[3];
   
-    rp.eos->calc_e(rp.n,rp.p,rp.hb);
-    pright=rp.hb.pr;
-    mupright=rp.p.mu;
+    eos->calc_e(neutron,proton,hb);
+    pright=hb.pr;
+    mupright=proton.mu;
 
     sy[2]=pleft-pright;
     sy[3]=mupleft-mupright;
@@ -982,10 +966,10 @@ protected:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double difeq2(size_t ieq, double x, ubmatrix_row &y) {
+  double difeq(size_t ieq, double x, ubmatrix_row &y) {
     if (rhsmode==false) {
       ubvector y2=y, dydx(5);
-      derivs2(x,y2,dydx);
+      derivs(x,y2,dydx);
       if (ieq==0) {
 	return dydx[0]*y[4];
       } else if (ieq==1) {
@@ -1003,7 +987,7 @@ protected:
       y2[2]=y[1];
       y2[3]=0.0;
       y2[4]=y[2];
-      derivs2(x,y2,dydx);
+      derivs(x,y2,dydx);
       if (ieq==0) {
 	return dydx[0]*y[2];
       } else if (ieq==1) {
@@ -1011,19 +995,19 @@ protected:
       }
       return 0.0;
     }
-    O2SCL_ERR("Sanity in difeq2().",exc_esanity);
+    O2SCL_ERR("Sanity in difeq().",exc_esanity);
     return 0.0;
   }
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double left2(size_t ieq, double x, ubmatrix_row &y) {
+  double left(size_t ieq, double x, ubmatrix_row &y) {
 
     if (rhsmode==false) {
       
-      double delta=rp.nn0*monfact/exp(big*expo);
-      double epsi=delta*(-rp.dmundn+rp.qnn*expo*expo)/
-	(rp.dmundp-rp.qnp*expo*expo);
+      double delta=nn_left*monfact/exp(big*expo);
+      double epsi=delta*(-dmundn+qnn*expo*expo)/
+	(dmundp-qnp*expo*expo);
       
       if (epsi*delta<0.0) {
 	cout << "epsi and delta have different signs" << endl;
@@ -1032,9 +1016,9 @@ protected:
       
       double ret;
       if (ieq==0) {
-	ret=y[0]-(rp.nn0-delta*exp(big*expo));
+	ret=y[0]-(nn_left-delta*exp(big*expo));
       } else if (ieq==1) {
-	ret=y[1]-(rp.np0-epsi*exp(big*expo));
+	ret=y[1]-(np_left-epsi*exp(big*expo));
       } else if (ieq==2) {
 	ret=y[2]+delta*expo*exp(big*expo);
       } else {
@@ -1050,7 +1034,7 @@ protected:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double right2(size_t ieq, double x, ubmatrix_row &y) {
+  double right(size_t ieq, double x, ubmatrix_row &y) {
     if (rhsmode==false) {
       return y[1];
     }
@@ -1071,7 +1055,21 @@ public:
   // Function prototypes
   
   int run(int argc, char *argv[]) {
-
+    
+    double lex1;
+    double lex2;
+    double rex1;
+    double rex2;
+    
+    double dndnl;
+    double dndnr;
+    double dndpl;
+    double dndpr;
+    double dpdnl;
+    double dpdnr;
+    double dpdpl;
+    double dpdpr;
+    
     double wd=0.0, wd2=0.0, dtemp;
     double rhsn, rhsp, det;
     double surf, sbulk, sgrad, sssv_drop=0.0, *pflist;
@@ -1080,7 +1078,7 @@ public:
     // Locations of fixed relative densities
     double xn[3], xp[3];
     double thick;
-    int pf_index, npf;
+    int npf;
     ofstream fout;
     double lon, lop, hin, hip, sqt;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
@@ -1106,21 +1104,21 @@ public:
 
     if (model==((string)"skyrme")) {
 
-      rp.eos=&eoss;
+      eos=&eoss;
       skyrme_load(eoss,"NRAPR");
       
       // Determine values of Q_{nn}, Q_{pp}, and Q_{np}
-      rp.qnn=0.1875*(eoss.t1*(1.0-eoss.x1)-eoss.t2*(1.0+eoss.x2));
-      rp.qpp=rp.qnn;
-      rp.qnp=0.125*(3.0*eoss.t1*(1.0+eoss.x1/2.0)-
-		    eoss.t2*(1.0+eoss.x2/2.0));
+      qnn=0.1875*(eoss.t1*(1.0-eoss.x1)-eoss.t2*(1.0+eoss.x2));
+      qpp=qnn;
+      qnp=0.125*(3.0*eoss.t1*(1.0+eoss.x1/2.0)-
+		 eoss.t2*(1.0+eoss.x2/2.0));
       
     } else if (model==((string)"schematic")) {
-      rp.eos=&eosp;
+      eos=&eosp;
     } else if (model==((string)"apr")) {
-      rp.eos=&eosa;
+      eos=&eosa;
     } else if (model==((string)"gp")) {
-      rp.eos=&eosg;
+      eos=&eosg;
     } else {
       cout << "Unknown EOS" << endl;
       exit(-1);
@@ -1129,12 +1127,12 @@ public:
     //--------------------------------------------
     // Test if Qnn=Qnp
 
-    if (model!="gp" && model!="apr" && fabs(rp.qnn-rp.qnp)<1.0e-7) {
+    if (model!="gp" && model!="apr" && fabs(qnn-qnp)<1.0e-7) {
       qnn_equals_qnp=true;
       cout << "Qnn=Qnp" << endl;
       if (true) {
-	rp.qnn/=1.01;
-	rp.qpp/=1.01;
+	qnn/=1.01;
+	qpp/=1.01;
 	cout << "Qnn hacked. Qnn!=Qnp" << endl;
 	qnn_equals_qnp=false;
       }
@@ -1157,24 +1155,24 @@ public:
 
     minerr=1.0e-6;
     relaxconverge=1.0e-9;
-    rp.showrelax=true;
+    showrelax=true;
     relaxfile=false;
     firstderiv=-2.0e-4;
     rhsmin=1.0e-7;
     monfact=0.002;
 
-    rp.n.init(o2scl_settings.get_convert_units().convert
-	      ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
-    rp.p.init(o2scl_settings.get_convert_units().convert
-	      ("kg","1/fm",o2scl_mks::mass_proton),2.0);
-    rp.n.non_interacting=false;
-    rp.p.non_interacting=false;
-    rp.eos->set_n_and_p(rp.n,rp.p);
-    rp.eos->set_thermo(rp.hb);
+    neutron.init(o2scl_settings.get_convert_units().convert
+		 ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
+    proton.init(o2scl_settings.get_convert_units().convert
+		("kg","1/fm",o2scl_mks::mass_proton),2.0);
+    neutron.non_interacting=false;
+    proton.non_interacting=false;
+    eos->set_n_and_p(neutron,proton);
+    eos->set_thermo(hb);
 
     // Compute saturation density
-    rp.n0half=rp.eos->fn0(0.0,dtemp);
-    double r0=cbrt(0.75/pi/rp.n0half);
+    n0half=eos->fn0(0.0,dtemp);
+    double r0=cbrt(0.75/pi/ n0half);
 
     pflist=new double[2];
     pflist[0]=0.45;
@@ -1182,30 +1180,29 @@ public:
     npf=2;
   
     for(pf_index=1;pf_index<=npf;pf_index++) {
-      rp.pf_index=pf_index;
-      rp.protfrac=pflist[pf_index-1];
+      protfrac=pflist[pf_index-1];
 
       //------------------------------------------------------
       // Calculate properties of saturated nuclear matter with
       // appropriate value of proton fraction including the
       // possibility of drip particles if they exist
       
-      rp.nsat=rp.eos->fn0(1.0-2.0*rp.protfrac,dtemp);
-      rp.np0=rp.nsat*rp.protfrac;
-      rp.nn0=rp.nsat-rp.np0;
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
-      rp.mun=rp.n.mu;
-      rp.mup=rp.p.mu;
+      nsat=eos->fn0(1.0-2.0*protfrac,dtemp);
+      np_left=nsat*protfrac;
+      nn_left=nsat-np_left;
+      neutron.n=nn_left;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
+      mun=neutron.mu;
+      mup=proton.mu;
       nndrip=0.0;
       npdrip=0.0;
 
-      if (rp.mun>rp.n.m) {
+      if (mun> neutron.m) {
 	cout << "Neutron drip" << endl;
 
-	sx[0]=rp.n.n;
-	sx[1]=rp.p.n;
+	sx[0]=neutron.n;
+	sx[1]=proton.n;
 	sx[2]=0.01;
 	mm_funct11 ndf=std::bind
 	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
@@ -1218,23 +1215,23 @@ public:
 	  exit(-1);
 	}
 
-	rp.nn0=sx[0];
-	rp.np0=sx[1];
-	rp.n.n=rp.nn0;
-	rp.p.n=rp.np0;
-	rp.eos->calc_e(rp.n,rp.p,rp.hb);
-	rp.mun=rp.n.mu;
-	rp.mup=rp.p.mu;
+	nn_left=sx[0];
+	np_left=sx[1];
+	neutron.n=nn_left;
+	proton.n=np_left;
+	eos->calc_e(neutron,proton,hb);
+	mun=neutron.mu;
+	mup=proton.mu;
 	nndrip=sx[2];
 	npdrip=0.0;
 
       }
 
-      if (rp.mup>rp.p.m) {
+      if (mup> proton.m) {
 	cout << "Proton drip" << endl;
 
-	sx[0]=rp.n.n;
-	sx[1]=rp.p.n;
+	sx[0]=neutron.n;
+	sx[1]=proton.n;
 	sx[2]=0.01;
 	mm_funct11 pdf=std::bind
 	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
@@ -1247,20 +1244,20 @@ public:
 	  exit(-1);
 	}
 
-	rp.nn0=sx[0];
-	rp.np0=sx[1];
-	rp.eos->calc_e(rp.n,rp.p,rp.hb);
-	rp.mun=rp.n.mu;
-	rp.mup=rp.p.mu;
+	nn_left=sx[0];
+	np_left=sx[1];
+	eos->calc_e(neutron,proton,hb);
+	mun=neutron.mu;
+	mup=proton.mu;
 	nndrip=0.0;
 	npdrip=sx[2];
 
       }
 
-      rp.nsat=rp.nn0+rp.np0;
-      cout << "Saturation density at x=" << rp.protfrac << ": " << rp.nsat 
+      nsat=nn_left+np_left;
+      cout << "Saturation density at x=" <<  protfrac << ": " <<  nsat 
 	   << endl;
-      cout << "nn0: " << rp.nn0 << " np0: " << rp.np0 << endl;
+      cout << "nn_left: " <<  nn_left << " np_left: " <<  np_left << endl;
       cout << "nndrip: " << nndrip << " npdrip: " << npdrip << endl;
 
       //--------------------------------------------
@@ -1269,244 +1266,244 @@ public:
 
       // dmundn
    
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
-      hin=rp.n.mu;
+      neutron.n=nn_left;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
+      hin=neutron.mu;
 
-      rp.n.n=rp.nn0-1.0e-4;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
-      lon=rp.n.mu;
+      neutron.n=nn_left-1.0e-4;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
+      lon=neutron.mu;
     
-      rp.dmundn=1.0e4*(hin-lon);
+      dmundn=1.0e4*(hin-lon);
   
       // dmundp
   
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
-      hin=rp.n.mu;
+      neutron.n=nn_left;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
+      hin=neutron.mu;
 
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0-1.0e-4;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
-      lon=rp.n.mu;
+      neutron.n=nn_left;
+      proton.n=np_left-1.0e-4;
+      eos->calc_e(neutron,proton,hb);
+      lon=neutron.mu;
     
-      rp.dmundp=1.0e4*(hin-lon);
+      dmundp=1.0e4*(hin-lon);
   
       //--------------------------------------------
       // Calculate derivatives of the RHS's numerically
   
       // At the left hand side
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=nn_left;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       hin=rhsn;
       hip=rhsp;
 
-      rp.n.n=rp.nn0-1.0e-4;
-      rp.p.n=rp.np0;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=nn_left-1.0e-4;
+      proton.n=np_left;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       lon=rhsn;
       lop=rhsp;
 
-      rp.dndnl=1.0e4*(hin-lon);
-      rp.dpdnl=1.0e4*(hip-lop);
+      dndnl=1.0e4*(hin-lon);
+      dpdnl=1.0e4*(hip-lop);
   
-      rp.n.n=rp.nn0;
-      rp.p.n=rp.np0-1.0e-4;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=nn_left;
+      proton.n=np_left-1.0e-4;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       lon=rhsn;
       lop=rhsp;
   
-      rp.dndpl=1.0e4*(hin-lon);
-      rp.dpdpl=1.0e4*(hip-lop);
+      dndpl=1.0e4*(hin-lon);
+      dpdpl=1.0e4*(hip-lop);
   
       // At the right hand side
-      rp.n.n=1.0e-4;
-      rp.p.n=1.0e-4;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=1.0e-4;
+      proton.n=1.0e-4;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       hin=rhsn;
       hip=rhsp;
   
-      rp.n.n=1.0e-8;
-      rp.p.n=1.0e-4;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=1.0e-8;
+      proton.n=1.0e-4;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       lon=rhsn;
       lop=rhsp;
   
-      rp.dndnr=1.0e4*(hin-lon);
-      rp.dpdnr=1.0e4*(hip-lop);
+      dndnr=1.0e4*(hin-lon);
+      dpdnr=1.0e4*(hip-lop);
   
-      rp.n.n=1.0e-4;
-      rp.p.n=1.0e-8;
-      rp.eos->calc_e(rp.n,rp.p,rp.hb);
+      neutron.n=1.0e-4;
+      proton.n=1.0e-8;
+      eos->calc_e(neutron,proton,hb);
       if (model=="apr") {
-	eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			   dqnndnn,dqnndnp,dqnpdnn,
-			   dqnpdnp,dqppdnn,dqppdnp);
+	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
+			    dqnndnn,dqnndnp,dqnpdnn,
+			    dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
-	eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	eosg.gradient_qij(neutron,proton,thth, qnn, qnp, qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
-      det=rp.qnn*rp.qpp-rp.qnp*rp.qnp;
+      det=qnn*qpp-qnp*qnp;
       if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
-	rhsn=(rp.n.mu-rp.mun)/rp.qpp/2.0;
-	rhsp=(rp.p.mu-rp.mup)/rp.qnn/2.0;
+	rhsn=(neutron.mu-mun)/ qpp/2.0;
+	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
-	rhsn=(rp.n.mu-rp.mun)*rp.qpp-(rp.p.mu-rp.mup)*rp.qnp;
-	rhsp=(rp.p.mu-rp.mup)*rp.qnn-(rp.n.mu-rp.mun)*rp.qnp;
+	rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
+	rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
 	rhsn/=det;
 	rhsp/=det;
       }
       lon=rhsn;
       lop=rhsp;
   
-      rp.dndpr=1.0e4*(hin-lon);
-      rp.dpdpr=1.0e4*(hip-lop);
+      dndpr=1.0e4*(hin-lon);
+      dpdpr=1.0e4*(hip-lop);
   
       goodbound=true;
 
-      sqt=sqrt(rp.dndnl*rp.dndnl-2.0*rp.dpdpl*rp.dndnl+rp.dpdpl*rp.dpdpl+
-	       4.0*rp.dndpl*rp.dpdnl);
-      rp.lex1=sqrt(2.0*(rp.dndnl+rp.dpdpl)+2.0*sqt)/2.0;
-      rp.lex2=sqrt(2.0*(rp.dndnl+rp.dpdpl)-2.0*sqt)/2.0;
+      sqt=sqrt(dndnl*dndnl-2.0*dpdpl*dndnl+dpdpl*dpdpl+
+		4.0*dndpl*dpdnl);
+      lex1=sqrt(2.0*(dndnl+dpdpl)+2.0*sqt)/2.0;
+      lex2=sqrt(2.0*(dndnl+dpdpl)-2.0*sqt)/2.0;
 
-      if (!std::isfinite(rp.lex1)) {
+      if (!std::isfinite(lex1)) {
 	goodbound=false;
-	rp.lex1=0.0;
+	lex1=0.0;
       }
-      if (!std::isfinite(rp.lex2)) {
-	expo=rp.lex1;
-	rp.lex2=0.0;
+      if (!std::isfinite(lex2)) {
+	expo=lex1;
+	lex2=0.0;
 	goodbound=false;
-      } else if (rp.lex2<rp.lex1) {
-	expo=rp.lex2;
+      } else if (lex2< lex1) {
+	expo=lex2;
       } else {
-	expo=rp.lex1;
+	expo=lex1;
       }
 
-      sqt=sqrt(rp.dndnr*rp.dndnr-2.0*rp.dpdpr*rp.dndnr+rp.dpdpr*rp.dpdpr+
-	       4.0*rp.dndpr*rp.dpdnr);
-      rp.rex1=-sqrt(2.0*(rp.dndnr+rp.dpdpr)+2.0*sqt)/2.0;
-      rp.rex2=-sqrt(2.0*(rp.dndnr+rp.dpdpr)-2.0*sqt)/2.0;
+      sqt=sqrt(dndnr*dndnr-2.0*dpdpr*dndnr+dpdpr*dpdpr+
+		4.0*dndpr*dpdnr);
+      rex1=-sqrt(2.0*(dndnr+dpdpr)+2.0*sqt)/2.0;
+      rex2=-sqrt(2.0*(dndnr+dpdpr)-2.0*sqt)/2.0;
   
-      if (!std::isfinite(rp.rex1)) {
+      if (!std::isfinite(rex1)) {
 	goodbound=false;
-	rp.rex1=0.0;
+	rex1=0.0;
       }
-      if (!std::isfinite(rp.rex2)) {
+      if (!std::isfinite(rex2)) {
 	goodbound=false;
-	rp.rex2=0.0;
+	rex2=0.0;
       }
 
       //--------------------------------------------
@@ -1529,17 +1526,17 @@ public:
       o2scl::interp<std::vector<double>,std::vector<double> > it(itp_linear);
       
       for(int i=0;i<3;i++) {
-	xn[i]=it.eval(nndrip+(rp.nn0-nndrip)/10.0*((double)(i*4+1)),
+	xn[i]=it.eval(nndrip+(nn_left-nndrip)/10.0*((double)(i*4+1)),
 		      at.get_nlines(),at.get_column("nn"),
 		      at.get_column("x"));
-	xp[i]=it.eval(npdrip+(rp.np0-npdrip)/10.0*((double)(i*4+1)),
+	xp[i]=it.eval(npdrip+(np_left-npdrip)/10.0*((double)(i*4+1)),
 		      at.get_nlines(),at.get_column("np"),
 		      at.get_column("x"));
       }
       
-      delta=1.0-2.0*rp.protfrac;
-      rp.barn=rp.nsat;
-      hns=rp.eos->fesym(rp.barn);
+      delta=1.0-2.0*protfrac;
+      barn=nsat;
+      hns=eos->fesym(barn);
 
       if (verbose>1) cout << "Integrands." << endl;
       for(int i=0;i<((int)at.get_nlines());i++) {
@@ -1547,44 +1544,44 @@ public:
 	if (at[1][i]<0.0) at.set(1,i,0.0);
 	if (at[2][i]<0.0) at.set(2,i,0.0);
 
-	rp.n.n=at[1][i];
-	rp.p.n=at.get(2,i);
+	neutron.n=at[1][i];
+	proton.n=at.get(2,i);
 
-	rp.eos->calc_e(rp.n,rp.p,rp.hb);
+	eos->calc_e(neutron,proton,hb);
 
 	if (model=="apr") {
-	  eosa.gradient_qij2(rp.n.n,rp.p.n,rp.qnn,rp.qnp,rp.qpp,
-			     dqnndnn,dqnndnp,dqnpdnn,
-			     dqnpdnp,dqppdnn,dqppdnp);
-	  at.set("qnn",i,rp.qnn);
-	  at.set("qnp",i,rp.qnp);
-	  at.set("qpp",i,rp.qpp);
+	  eosa.gradient_qij2(neutron.n,proton.n,qnn,qnp,qpp,
+			      dqnndnn,dqnndnp,dqnpdnn,
+			      dqnpdnp,dqppdnn,dqppdnp);
+	  at.set("qnn",i,qnn);
+	  at.set("qnp",i,qnp);
+	  at.set("qpp",i,qpp);
 	}
 	if (model=="gp") {
 	  thermo thth;
-	  eosg.gradient_qij(rp.n,rp.p,thth,rp.qnn,rp.qnp,rp.qpp,
+	  eosg.gradient_qij(neutron,proton,thth,qnn,qnp,qpp,
 			    dqnndnn,dqnndnp,dqnpdnn,
 			    dqnpdnp,dqppdnn,dqppdnp);
-	  at.set("qnn",i,rp.qnn);
-	  at.set("qnp",i,rp.qnp);
-	  at.set("qpp",i,rp.qpp);
+	  at.set("qnn",i,qnn);
+	  at.set("qnp",i,qnp);
+	  at.set("qpp",i,qpp);
 	} 
 
-	at.set("rho",i,rp.n.n+rp.p.n);
-	at.set("alpha",i,rp.n.n-rp.p.n);
-	at.set("ebulk",i,rp.hb.ed-rp.mun*at.get(1,i)-rp.mup*at.get(2,i));
-	at.set("egrad",i,0.5*rp.qnn*at.get(3,i)*at.get(3,i)+
-	       0.5*rp.qpp*at.get(4,i)*at.get(4,i)+
-	       rp.qnp*at.get(3,i)*at.get(4,i));
+	at.set("rho",i,neutron.n+proton.n);
+	at.set("alpha",i,neutron.n-proton.n);
+	at.set("ebulk",i,hb.ed-mun*at.get(1,i)-mup*at.get(2,i));
+	at.set("egrad",i,0.5*qnn*at.get(3,i)*at.get(3,i)+
+	       0.5*qpp*at.get(4,i)*at.get(4,i)+
+	       qnp*at.get(3,i)*at.get(4,i));
 	at.set("esurf",i,at.get("ebulk",i)+at.get("egrad",i));
-	at.set("thickint",i,at.get(1,i)/rp.nn0-at.get(2,i)/rp.np0);
-	if (fabs(rp.protfrac-0.5)>1.0e-8) {
+	at.set("thickint",i,at.get(1,i)/ nn_left-at.get(2,i)/np_left);
+	if (fabs(protfrac-0.5)>1.0e-8) {
 	  at.set("wdint",i,at.get("alpha",i)/delta-at.get("rho",i));
 	  if (at.get("rho",i)>=1.0e-5) {
-	    rp.barn=at.get("rho",i);
+	    barn=at.get("rho",i);
 	    at.set("wd2int",i,at.get("rho",i)*
 		   (pow(at.get("alpha",i)/delta/at.get("rho",i),2.0)*
-		    rp.eos->fesym(rp.barn)-hns));
+		    eos->fesym(barn)-hns));
 	  }
 	}
       }
@@ -1601,7 +1598,7 @@ public:
       thick=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		     at[0],(at.get_column("thickint")));
       if (verbose>1) cout << "thick: " << thick << endl;
-      if (fabs(rp.protfrac-0.5)>1.0e-8) {
+      if (fabs(protfrac-0.5)>1.0e-8) {
 	wd=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		    at[0],(at.get_column("wdint")));
 	wd*=hns;
@@ -1657,21 +1654,21 @@ public:
 	  ty[3]=(at.get("npp",i)+at.get("npp",i-1))/2.0;
 
 	  if (ty[1]<=0.0) rhsmode=true;
-	  derivs2(tx,ty,tdy);
+	  derivs(tx,ty,tdy);
 	  
 	  at.set("rhsn",i,tdy[2]);
 	  at.set("rhsp",i,tdy[3]);
 	  
 	  if (ty[1]>0.0) {
-	    at.set("lhs_n",i,(rp.n.mu-rp.mun+rp.p.mu-rp.mup)/2.0);
-	    at.set("lhs_a",i,(rp.n.mu-rp.mun-rp.p.mu+rp.mup)/2.0);
+	    at.set("lhs_n",i,(neutron.mu-mun+proton.mu-mup)/2.0);
+	    at.set("lhs_a",i,(neutron.mu-mun-proton.mu+mup)/2.0);
 	    at.set("rhs_n",i,(at.get("nnpp",i)+at.get("nppp",i))/2.0*
-		   (rp.qnn+rp.qnp));
+		   (qnn+qnp));
 	    at.set("rhs_a",i,(at.get("nnpp",i)-at.get("nppp",i))/2.0*
-		   (rp.qnn-rp.qnp));
+		   (qnn-qnp));
 	  } else {
-	    at.set("lhs_n",i,rp.n.mu-rp.mun);
-	    at.set("rhs_n",i,at.get("nnpp",i)*(rp.qnn));
+	    at.set("lhs_n",i,neutron.mu-mun);
+	    at.set("rhs_n",i,at.get("nnpp",i)*(qnn));
 	    at.set("lhs_a",i,0.0);
 	    at.set("rhs_a",i,0.0);
 	  }
