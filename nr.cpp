@@ -18,30 +18,17 @@
 
   -------------------------------------------------------------------
 */
-#include <iostream>
-#include <cmath>
-
-#include <boost/numeric/ublas/vector.hpp>
-#include <boost/numeric/ublas/matrix.hpp>
+#include "seminf.h"
 
 #include <o2scl/eos_had_apr.h>
-#include <o2scl/table.h>
-#include <o2scl/constants.h>
-#include <o2scl/part.h>
 #include <o2scl/eos_had_schematic.h>
 #include <o2scl/eos_had_skyrme.h>
 #include <o2scl/eos_had_potential.h>
+
 #include <o2scl/fermion_nonrel.h>
-#include <o2scl/deriv_gsl.h>
+
 #include <o2scl/inte_qagiu_gsl.h>
 #include <o2scl/inte_qag_gsl.h>
-#include <o2scl/hdf_file.h>
-#include <o2scl/hdf_io.h>
-#include <o2scl/hdf_eos_io.h>
-#include <o2scl/lib_settings.h>
-#include <o2scl/ode_it_solve.h>
-
-#include "seminf.h"
 
 using namespace std;
 using namespace o2scl;
@@ -138,8 +125,9 @@ protected:
   double npdrip;
   /// Desc (default false)
   bool flatden;
+
   /// Nonlinear equation solver
-  mroot_hybrids<> nd;
+  mroot_hybrids<mm_funct,si_vector_t,si_matrix_t,jac_funct> nd;
   /// Desc
   double nnrhs;
   /// Desc
@@ -161,16 +149,16 @@ protected:
 
   /// \name Desc
   //@{
-  ubvector xstor;
-  ubmatrix ystor;
+  si_vector_t xstor;
+  si_matrix_t ystor;
   //@}
   
   /// \name Desc
   //@{
-  ubvector xg1;
-  ubvector xg2;
-  ubmatrix yg1;
-  ubmatrix yg2;
+  si_vector_t xg1;
+  si_vector_t xg2;
+  si_matrix_t yg1;
+  si_matrix_t yg2;
   //@}
 
   /** \brief Desc
@@ -201,7 +189,7 @@ protected:
   
   /** \brief Desc
    */
-  int derivs(double sx, const ubvector &sy, ubvector &dydx) {
+  int derivs(double sx, const si_vector_t &sy, si_vector_t &dydx) {
     double rhsn, rhsp=0.0, det;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
 
@@ -314,11 +302,11 @@ protected:
     bool guessdone;
     int debug=0;
     double dx, xrhs, delta, epsi;
-    ubvector y(5), dydx(5);
+    si_vector_t y(5), dydx(5);
     int ilast=0, interpi;
     int n_eq=5, n_b;
-    ubvector ox(ngrid);
-    ubmatrix oy(ngrid,n_eq);
+    si_vector_t ox(ngrid);
+    si_matrix_t oy(ngrid,n_eq);
 
     monfact=lmonfact;
 
@@ -330,22 +318,30 @@ protected:
     } else {
       n_b=4;
     }
-    
-    ode_it_funct11 f_derivs=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+
+    ode_it_funct f_derivs=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_nr::difeq),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);       
-    ode_it_funct11 f_left=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+    ode_it_funct f_left=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_nr::left),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);       
-    ode_it_funct11 f_right=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+    ode_it_funct f_right=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_nr::right),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);   
-    ode_it_solve<> oit;
-    ubmatrix A(ngrid*n_eq,ngrid*n_eq);
-    ubvector rhs(ngrid*n_eq),dy(ngrid*n_eq);
+    ode_it_solve<ode_it_funct,si_vector_t,si_matrix_t,si_matrix_row_t,
+		 si_vector_t,si_matrix_t> oit;
+
+#ifdef USE_EIGEN
+    o2scl_linalg::linear_solver_eigen_colQR
+      <Eigen::VectorXd,Eigen::MatrixXd> sol;
+    oit.set_solver(sol);
+#endif
+    
+    si_matrix_t A(ngrid*n_eq,ngrid*n_eq);
+    si_vector_t rhs(ngrid*n_eq),dy(ngrid*n_eq);
     
     if (pf_index==1) {
 
@@ -456,7 +452,7 @@ protected:
     oit.verbose=1;
     oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
 	      A,rhs,dy);
-
+    
     if (debug>0) {
       for(int i=0;i<ngrid;i+=9) {
 	cout.precision(4);
@@ -509,7 +505,7 @@ protected:
     }
 
     //----------------------------------------------
-    // Store solution and delete seminf_nr_relax
+    // Store solution and delete seminf_si_relax
 
     at.set_nlines(ngrid);
     for(int i=0;i<ngrid;i++) {
@@ -616,7 +612,7 @@ protected:
       }
   
       //----------------------------------------------
-      // Store solution and delete seminf_nr_relax
+      // Store solution and delete seminf_si_relax
       
       for(int i=0;i<ngrid;i++) {
 	at.set(0,i+ngrid-1,ox(i));
@@ -675,7 +671,7 @@ protected:
     bool guessdone, debug=false;
     double dx, y[5], dydx[5], xrhs;
     int ilast=0, interpi;
-    ubvector sx(3), sy(3);
+    si_vector_t sx(3), sy(3);
     int n_eq=3, n_b=2;
 
     monfact=lmonfact;
@@ -683,7 +679,7 @@ protected:
     //----------------------------------------------
     // Create object
 
-    rel=new seminf_nr_relax(3,2,ngrid);
+    rel=new seminf_si_relax(3,2,ngrid);
     rel->itmax=200;
     rel->rp=&rp;
 
@@ -703,8 +699,9 @@ protected:
 	sx[1]=(1.0-protfrac)*ystor(1,i-1);
 	sx[2]=protfrac*ystor(1,i-1);
 	barn=ystor(1,i-1);
-	mm_funct11 qqf=std::bind
-	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+
+	mm_funct qqf=std::bind
+	  (std::mem_fn<int(size_t,const si_vector_t &,si_vector_t &)>
 	   (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
 	   std::placeholders::_2,std::placeholders::_3);
 	nd.msolve(2,sx,qqf);
@@ -784,8 +781,9 @@ protected:
       sx[2]=protfrac*rel->y(1,i);
 
       barn=rel->y(1,i);
-      mm_funct11 qqf=std::bind
-	(std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+
+      mm_funct qqf=std::bind
+	(std::mem_fn<int(size_t,const si_vector_t &,si_vector_t &)>
 	 (&seminf_nr::qnnqnpfun),this,std::placeholders::_1,
 	 std::placeholders::_2,std::placeholders::_3);
       nd.msolve(2,sx,qqf);
@@ -819,7 +817,7 @@ protected:
     }
 
     //----------------------------------------------
-    // Delete seminf_nr_relax
+    // Delete seminf_si_relax
 
     delete rel;
 
@@ -827,7 +825,7 @@ protected:
     // RHS
     
     if (fabs(protfrac-0.5)>1.0e-4) {
-      rel=new seminf_nr_relax(3,1,ngrid);
+      rel=new seminf_si_relax(3,1,ngrid);
       rel->rp=&rp;
     
       if (pf_index==1) {
@@ -879,7 +877,7 @@ protected:
       }
     
       //----------------------------------------------
-      // Store solution, rescale, and delete seminf_nr_relax
+      // Store solution, rescale, and delete seminf_si_relax
     
       at.set_nlines(2*ngrid-1);
       for(int i=1;i<=rel->ngrid;i++) {
@@ -900,7 +898,7 @@ protected:
   
   /** \brief Desc
    */
-  int qnnqnpfun(size_t sn, const ubvector &sx, ubvector &sy) {
+  int qnnqnpfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
 
     neutron.n=sx[1];
     proton.n=sx[2];
@@ -916,7 +914,7 @@ protected:
 
   /** \brief Desc
    */
-  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+  int ndripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, munleft, munright;
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
@@ -944,7 +942,7 @@ protected:
 
   /** \brief Desc
    */
-  int pdripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+  int pdripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, mupleft, mupright;
 
     if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
@@ -972,9 +970,9 @@ protected:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double difeq(size_t ieq, double x, ubmatrix_row &y) {
+  double difeq(size_t ieq, double x, si_matrix_row_t &y) {
     if (rhsmode==false) {
-      ubvector y2=y, dydx(5);
+      si_vector_t y2=y, dydx(5);
       derivs(x,y2,dydx);
       if (ieq==0) {
 	return dydx[0]*y[4];
@@ -987,7 +985,7 @@ protected:
       }
       return 0.0;
     } else {
-      ubvector y2(5), dydx(5);
+      si_vector_t y2(5), dydx(5);
       y2[0]=y[0];
       y2[1]=0.0;
       y2[2]=y[1];
@@ -1007,7 +1005,7 @@ protected:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double left(size_t ieq, double x, ubmatrix_row &y) {
+  double left(size_t ieq, double x, si_matrix_row_t &y) {
 
     if (rhsmode==false) {
       
@@ -1040,7 +1038,7 @@ protected:
 
   /** \brief Future function for \ref o2scl::ode_it_solve
    */
-  double right(size_t ieq, double x, ubmatrix_row &y) {
+  double right(size_t ieq, double x, si_matrix_row_t &y) {
     if (rhsmode==false) {
       return y[1];
     }
@@ -1085,7 +1083,7 @@ public:
     double wd=0.0, wd2=0.0, dtemp;
     double rhsn, rhsp, det;
     double surf, sbulk, sgrad, sssv_drop=0.0, *pflist;
-    ubvector sx(5), sy(5);
+    si_vector_t sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0;
     // Locations of fixed relative densities
     double xn[3], xp[3];
@@ -1098,9 +1096,9 @@ public:
     int verbose=1;
     
     // Not used ATM but probably useful later
-    //ubvector rho, alpha, ebulk, egrad, esurf, thickint;
-    //ubvector wdint, wd2int;
-    //ubvector vqnn, vqnp, vqpp;
+    //si_vector_t rho, alpha, ebulk, egrad, esurf, thickint;
+    //si_vector_t wdint, wd2int;
+    //si_vector_t vqnn, vqnp, vqpp;
     
     nd.tol_abs=1.0e-11;
     nd.tol_rel=1.0e-8;
@@ -1216,10 +1214,12 @@ public:
 	sx[0]=neutron.n;
 	sx[1]=proton.n;
 	sx[2]=0.01;
-	mm_funct11 ndf=std::bind
-	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+
+	mm_funct ndf=std::bind
+	  (std::mem_fn<int(size_t,const si_vector_t &,si_vector_t &)>
 	   (&seminf_nr::ndripfun),this,std::placeholders::_1,
 	   std::placeholders::_2,std::placeholders::_3);
+	
 	nd.msolve(3,sx,ndf);
 	ndripfun(3,sx,sy);
 	if (fabs(sy[0])>1.0e-4 || fabs(sy[1])>1.0e-4 || fabs(sy[2])>1.0e-4) {
@@ -1245,8 +1245,9 @@ public:
 	sx[0]=neutron.n;
 	sx[1]=proton.n;
 	sx[2]=0.01;
-	mm_funct11 pdf=std::bind
-	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+
+	mm_funct pdf=std::bind
+	  (std::mem_fn<int(size_t,const si_vector_t &,si_vector_t &)>
 	   (&seminf_nr::pdripfun),this,std::placeholders::_1,
 	   std::placeholders::_2,std::placeholders::_3);
 	nd.msolve(3,sx,pdf);
@@ -1632,7 +1633,7 @@ public:
       if (true && qnn_equals_qnp==false && 
 	  (model=="skyrme" || model=="hcskyrme")) {
 	double tx;
-	ubvector ty(5), tdy(5);
+	si_vector_t ty(5), tdy(5);
 	if (!at.is_column("nnpp")) at.new_column("nnpp");
 	if (!at.is_column("nppp")) at.new_column("nppp");
 	if (!at.is_column("rhsn")) at.new_column("rhsn");

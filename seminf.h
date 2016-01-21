@@ -18,13 +18,43 @@
 
   -------------------------------------------------------------------
 */
+#include <iostream>
+#include <cmath>
+#include <functional>
+
+#include <boost/numeric/ublas/vector.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+
+#ifdef USE_EIGEN
+#include <Eigen/Dense>
+#endif
+
+#include <o2scl/table.h>
+#include <o2scl/constants.h>
+#include <o2scl/part.h>
+#include <o2scl/deriv_gsl.h>
+#include <o2scl/hdf_file.h>
+#include <o2scl/hdf_io.h>
+#include <o2scl/hdf_eos_io.h>
+#include <o2scl/lib_settings.h>
 #include <o2scl/ode_it_solve.h>
+#include <o2scl/linear_solver.h>
+#include <o2scl/interp.h>
 
-typedef boost::numeric::ublas::vector<double> ubvector;
-typedef boost::numeric::ublas::matrix<double> ubmatrix;
-typedef boost::numeric::ublas::matrix_row<ubmatrix> ubmatrix_row;
+#ifdef USE_EIGEN
+typedef Eigen::VectorXd si_vector_t;
+typedef Eigen::MatrixXd si_matrix_t;
+typedef Eigen::MatrixXd::RowXpr si_matrix_row_t;
+#else
+typedef boost::numeric::ublas::vector<double> si_vector_t;
+typedef boost::numeric::ublas::matrix<double> si_matrix_t;
+typedef boost::numeric::ublas::matrix_row<si_matrix_t> si_matrix_row_t;
+#endif
 
-/*
-  For now, this is a placeholder which might be useful for
-  functions common to both nr.cpp and rel.cpp .
-*/
+typedef std::function<
+  int(size_t,si_vector_t &,size_t,si_vector_t &,si_matrix_t &)> jac_funct;
+typedef std::function
+<int(size_t,const si_vector_t &,si_vector_t &)> mm_funct;
+typedef std::function
+<double(size_t,double,si_matrix_row_t &)> ode_it_funct;
+    

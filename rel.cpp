@@ -18,27 +18,9 @@
 
   -------------------------------------------------------------------
 */
-#include <cmath>
-#include <iostream>
-#include <functional>
-
-#include <o2scl/table.h>
-#include <o2scl/constants.h>
-#include <o2scl/part.h>
-#include <o2scl/eos_had_rmf.h>
-#include <o2scl/fermion_nonrel.h>
-#include <o2scl/deriv_gsl.h>
-#include <o2scl/inte_qagiu_gsl.h>
-#include <o2scl/inte_qag_gsl.h>
-#include <o2scl/hdf_file.h>
-#include <o2scl/hdf_io.h>
-#include <o2scl/hdf_eos_io.h>
-#include <o2scl/lib_settings.h>
-#include <o2scl/mroot_hybrids.h>
-#include <o2scl/mm_funct.h>
-#include <o2scl/interp.h>
-
 #include "seminf.h"
+
+#include <o2scl/eos_had_rmf.h>
 
 using namespace std;
 using namespace o2scl;
@@ -118,7 +100,7 @@ protected:
   /** \brief Equations for the boundary conditions in 
       the case of a neutron drip
    */
-  int ndripfun(size_t sn, const ubvector &sx, ubvector &sy) {
+  int ndripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, munleft, munright;
 
     neutron.n=sx[0];
@@ -148,7 +130,7 @@ protected:
 
   /** \brief Differential equations to solve
    */
-  double difeq(size_t ieq, double x, ubmatrix_row &y) {
+  double difeq(size_t ieq, double x, si_matrix_row_t &y) {
     
     neutron.mu=mun;
     proton.mu=mup;
@@ -167,7 +149,7 @@ protected:
 
   /** \brief LHS boundary conditions
    */
-  double left(size_t ieq, double x, ubmatrix_row &y) {
+  double left(size_t ieq, double x, si_matrix_row_t &y) {
     if (ieq==0) return y[0]-sigma_left;
     if (ieq==1) return y[1]-omega_left;
     return y[2]-rho_left;
@@ -175,7 +157,7 @@ protected:
 
   /** \brief RHS boundary conditions
    */
-  double right(size_t ieq, double x, ubmatrix_row &y) {
+  double right(size_t ieq, double x, si_matrix_row_t &y) {
     if (ieq==0) return y[0];
     if (ieq==1) return y[1];
     return y[2];
@@ -209,8 +191,8 @@ public:
     static const int ne=6, nb=3;
     int lastit;
     int npoints=64;
-    ubvector xstor(ngrid);
-    ubmatrix ystor(ne,ngrid);
+    si_vector_t xstor(ngrid);
+    si_matrix_t ystor(ne,ngrid);
 
     // Output quantities
     double wd=0.0;
@@ -239,7 +221,7 @@ public:
     //--------------------------------------------
     // Euqation solver
 
-    mroot_hybrids<> nd;
+    mroot_hybrids<mm_funct,si_vector_t,si_matrix_t,jac_funct> nd;
     nd.tol_abs=1.0e-15;
     nd.tol_rel=1.0e-12;
     nd.ntrial=100;
@@ -258,23 +240,31 @@ public:
     //--------------------------------------------
     // Initializations for ODE solver
     
-    ode_it_solve<> oit;
-    ode_it_funct11 f_derivs=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+    ode_it_solve<ode_it_funct,si_vector_t,si_matrix_t,si_matrix_row_t,
+		 si_vector_t,si_matrix_t> oit;
+    ode_it_funct f_derivs=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_rel::difeq),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);       
-    ode_it_funct11 f_left=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+    ode_it_funct f_left=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_rel::left),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);       
-    ode_it_funct11 f_right=std::bind
-      (std::mem_fn<double(size_t,double,ubmatrix_row &)>
+    ode_it_funct f_right=std::bind
+      (std::mem_fn<double(size_t,double,si_matrix_row_t &)>
        (&seminf_rel::right),this,std::placeholders::_1,
        std::placeholders::_2,std::placeholders::_3);   
-    ubvector ox(ngrid);
-    ubmatrix oy(ngrid,ne);
-    ubmatrix A(ngrid*ne,ngrid*ne);
-    ubvector rhs(ngrid*ne), dy(ngrid*ne);
+
+#ifdef USE_EIGEN
+    o2scl_linalg::linear_solver_eigen_colQR
+      <Eigen::VectorXd,Eigen::MatrixXd> sol;
+    oit.set_solver(sol);
+#endif
+
+    si_vector_t ox(ngrid);
+    si_matrix_t oy(ngrid,ne);
+    si_matrix_t A(ngrid*ne,ngrid*ne);
+    si_vector_t rhs(ngrid*ne), dy(ngrid*ne);
     if (outputiter) oit.verbose=1;
     else oit.verbose=0;
     
@@ -329,13 +319,13 @@ public:
 
 	protfrac=0.3;
 
-	ubvector px(3);
+	si_vector_t px(3);
 	px[0]=0.07;
 	px[1]=0.07;
 	px[2]=0.04;
 	
-	mm_funct11 mff=std::bind
-	  (std::mem_fn<int(size_t,const ubvector &,ubvector &)>
+	mm_funct mff=std::bind
+	  (std::mem_fn<int(size_t,const si_vector_t &,si_vector_t &)>
 	   (&seminf_rel::ndripfun),this,std::placeholders::_1,
 	   std::placeholders::_2,std::placeholders::_3);
 	cout << nd.msolve(3,px,mff) << endl;
@@ -619,7 +609,7 @@ public:
       //----------------------------------------------------------
       // Calculate the value of x for nn*0.9, nn*0.5, nn*0.1, etc.
       
-      o2scl::interp<std::vector<double>,ubvector> it(itp_linear);
+      o2scl::interp<std::vector<double>,si_vector_t> it(itp_linear);
       
       for(int i=0;i<3;i++) {
 	xn[i]=it.eval(nn_left/10.0*((double)(i*4+1)),ngrid,
@@ -688,9 +678,9 @@ public:
 	    tweight=xint*gl->get_weight(i);
 	  }
 
-	  ubmatrix_row ar1(*rel->y,1);
-	  ubmatrix_row ar2(*rel->y,2);
-	  ubmatrix_row ar3(*rel->y,3);
+	  si_matrix_row_t ar1(*rel->y,1);
+	  si_matrix_row_t ar2(*rel->y,2);
+	  si_matrix_row_t ar3(*rel->y,3);
 	
 	  neutron.n=lookup(ngrid,nint,rhon,rho);
 	  proton.n=lookup(ngrid,nint,rhop,rho);

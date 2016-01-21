@@ -19,7 +19,19 @@
     The code appears to work marginally for Skyrme model NRAPR (see
     \ref seminf_nr) and RMF model RAPR (see \ref seminf_rel), but
     still needs quite a bit of work.
-    
+
+    \comment
+    Eigen isn't working yet...
+
+    This code is designed to work with generic vector or matrix types.
+    By default, uBlas vector and matrix types are used and the O2scl
+    dense solver is used. Better performance can be obtained with the
+    <a href="http://eigen.tuxfamily.org">Eigen</a> linear algebra
+    library. If USE_EIGEN is defined, then Eigen vector and matrix
+    types are used and the Eigen QR solver with column pivoting is
+    used.
+    \endcomment
+
     The surface tension (surface energy per unit area) is
     \f[
     \omega \equiv \int~dz \left[ \varepsilon(z) - 
