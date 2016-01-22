@@ -24,6 +24,7 @@
 
 #include <boost/numeric/ublas/vector.hpp>
 #include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/matrix_sparse.hpp>
 
 #ifdef USE_EIGEN
 #include <Eigen/Dense>
@@ -45,10 +46,12 @@
 typedef Eigen::VectorXd si_vector_t;
 typedef Eigen::MatrixXd si_matrix_t;
 typedef Eigen::MatrixXd::RowXpr si_matrix_row_t;
+typedef Eigen::MatrixXd si_sp_matrix_t;
 #else
 typedef boost::numeric::ublas::vector<double> si_vector_t;
 typedef boost::numeric::ublas::matrix<double> si_matrix_t;
 typedef boost::numeric::ublas::matrix_row<si_matrix_t> si_matrix_row_t;
+typedef boost::numeric::ublas::matrix<double> si_sp_matrix_t;
 #endif
 
 typedef std::function<

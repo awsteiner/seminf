@@ -332,15 +332,15 @@ protected:
        (&seminf_nr::right),this,std::placeholders::_1,std::placeholders::_2,
        std::placeholders::_3);   
     ode_it_solve<ode_it_funct,si_vector_t,si_matrix_t,si_matrix_row_t,
-		 si_vector_t,si_matrix_t> oit;
+		 si_vector_t,si_sp_matrix_t> oit;
 
 #ifdef USE_EIGEN
     o2scl_linalg::linear_solver_eigen_colQR
       <Eigen::VectorXd,Eigen::MatrixXd> sol;
     oit.set_solver(sol);
 #endif
-    
-    si_matrix_t A(ngrid*n_eq,ngrid*n_eq);
+
+    si_sp_matrix_t A(ngrid*n_eq,ngrid*n_eq);
     si_vector_t rhs(ngrid*n_eq),dy(ngrid*n_eq);
     
     if (pf_index==1) {
