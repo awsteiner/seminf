@@ -1,5 +1,5 @@
-bamr
-====
+seminf
+======
 
 Semi-infinite matter in the Thomas-Fermi approximation
 

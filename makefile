@@ -21,6 +21,12 @@ rel: rel.o
 clean:
 	rm -f nr *.o rel
 
+check:
+	nr check > check_nr.scr
+	tail -n 2 check_nr.scr
+	rel check > check_rel.scr
+	tail -n 2 check_rel.scr
+
 doc: empty
 	git rev-parse HEAD | awk \
 		'{print "<a href=\"http://github.com/awsteiner/seminf/tree/" $$1 "\">" $$1 "</a>"}' \

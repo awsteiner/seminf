@@ -1711,5 +1711,44 @@ int main(int argc, char *argv[]) {
 
   seminf_nr sn;
   sn.run(argc,argv);
+
+  if (argc>=2 && ((std::string)argv[1])=="check") {
+    test_mgr t;
+    t.set_output_level(2);
+    hdf_file hf;
+    string name;
+    table_units<> tab;
+
+    hf.open("nr.o2");
+    name="nr1";
+    hdf_input(hf,tab,name);
+    hf.close();
+
+    t.test_rel(tab.get("nnp",0),-1.916439e-4,1.0e-6,"nnp left");
+    t.test_rel(tab.get("npp",0),-1.783086e-4,1.0e-6,"npp left");
+    t.test_rel(tab.get("egrad",0),4.441264e-8,1.0e-6,"egrad left");
+    t.test_rel(tab.get("wd2int",0),3.755575e-5,1.0e-6,"wd2int left");
+    
+    t.test_rel(tab.get("scale",198),3.544944e-1,1.0e-6,"scale right");
+    t.test_rel(tab.get("nnpp",198),5.102042e-2,1.0e-6,"nnpp right");
+    t.test_rel(tab.get("rhs_n",198),2.453954e-2,1.0e-6,"rhs_n right");
+
+    hf.open("nr.o2");
+    name="nr2";
+    hdf_input(hf,tab,name);
+    hf.close();
+
+    t.test_rel(tab.get("nnp",0),-1.893404e-4,1.0e-6,"nnp left");
+    t.test_rel(tab.get("npp",0),-1.787077e-4,1.0e-6,"npp left");
+    t.test_rel(tab.get("egrad",0),4.396190e-8,1.0e-6,"egrad left");
+    t.test_rel(tab.get("wd2int",0),3.725649e-5,1.0e-6,"wd2int left");
+    
+    t.test_rel(tab.get("scale",198),2.834648e-1,1.0e-6,"scale right");
+    t.test_rel(tab.get("nnpp",198),5.723365e-2,1.0e-6,"nnpp right");
+    t.test_rel(tab.get("rhs_n",198),2.752795e-2,1.0e-6,"rhs_n right");
+    
+    t.report();
+  }
+  
   return 0;
 }
