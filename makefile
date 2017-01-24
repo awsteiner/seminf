@@ -1,3 +1,17 @@
+ifeq ($(USER),awsteiner)
+
+else
+
+GSL_INC = .
+O2SCL_INC = .
+EIGEN_INC = .
+HDF5_INC = .
+GSL_LIB = .
+O2SCL_LIB = .
+HDF5_LIB = .
+
+endif
+
 FLAGS = -I$(GSL_INC) -I$(O2SCL_INC) -std=c++0x -I$(EIGEN_INC) \
 	-I$(HDF5_INC) -Wno-deprecated-declarations
 #-DUSE_EIGEN

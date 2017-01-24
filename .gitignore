@@ -3,3 +3,4 @@ nr.o2
 nr
 *.o
 rel
+.travis.yml~
