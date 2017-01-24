@@ -750,5 +750,42 @@ int main(int argc, char *argv[]) {
 
   seminf_rel sn;
   sn.run(argc,argv);
+
+  if (argc>=2 && ((std::string)argv[1])=="check") {
+    test_mgr t;
+    t.set_output_level(2);
+    hdf_file hf;
+    string name;
+    table_units<> tab, tab_expected;
+
+    name="rel1";
+
+    hf.open("rel.o2");
+    hdf_input(hf,tab,name);
+    hf.close();
+
+    hf.open("rel_save.o2");
+    hdf_input(hf,tab_expected,name);
+    hf.close();
+
+    t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 1");
+
+    name="rel2";
+
+    hf.open("rel.o2");
+    hdf_input(hf,tab,name);
+    hf.close();
+
+    hf.open("rel_save.o2");
+    hdf_input(hf,tab_expected,name);
+    hf.close();
+
+    t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 2");
+    
+    if (!t.report()) {
+      exit(-1);
+    }
+  }
+  
   return 0;
 }

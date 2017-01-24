@@ -1,7 +1,8 @@
 seminf
 ======
 
-Semi-infinite matter in the Thomas-Fermi approximation
+Semi-infinite nucleonic matter in the Thomas-Fermi approximation at
+zero temperature.
 
-The full documentation for seminf is at http://web.utk.edu/~asteine1/seminf .
+The documentation for seminf is at http://web.utk.edu/~asteine1/seminf .
 
