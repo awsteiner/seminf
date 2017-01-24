@@ -39,7 +39,7 @@ script:
   # 'make install' does not fail. 
   # 
   - if [ "${TRAVIS_OS_NAME}" = "linux" ]; then
-      mkdir o2scl && cd o2scl && git clone https://github.com/awsteiner/o2scl && mkdir m4 && autoreconf -i && ./configure && make blank-doc && make install && cd .. && make rel && make nr && nr check && rel check ;
+      git clone https://github.com/awsteiner/o2scl && cd o2scl && mkdir m4 && autoreconf -i && ./configure && make blank-doc && make install && cd .. && make rel && make nr && nr check && rel check ;
     fi
   # 
   # Use homebrew to install the HEAD version on OSX. At the end,
