@@ -17,7 +17,7 @@ FLAGS = -I$(GSL_INC) -I$(O2SCL_INC) -std=c++0x -I$(EIGEN_INC) \
 #-DUSE_EIGEN
 
 LIBS = -L$(GSL_LIB) -L$(O2SCL_LIB) -L$(HDF5_LIB) \
-	-lo2scl_eos -lo2scl_part -lo2scl_hdf -lo2scl -lhdf5 -lhdf5_hl \
+	-lo2scl_hdf -lo2scl_eos -lo2scl_part -lo2scl -lhdf5 -lhdf5_hl \
 	-lreadline -lgsl -lgslcblas -lm
 
 nr.o: nr.cpp
@@ -36,9 +36,9 @@ clean:
 	rm -f nr *.o rel
 
 check:
-	nr check > check_nr.scr
+	./nr check > check_nr.scr
 	tail -n 2 check_nr.scr
-	rel check > check_rel.scr
+	./rel check > check_rel.scr
 	tail -n 2 check_rel.scr
 
 doc: empty
