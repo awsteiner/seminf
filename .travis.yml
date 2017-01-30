@@ -47,7 +47,7 @@ script:
   # We need to use '-v' for brew install so that the build doesn't timeout.
   # 
   - if [ "${TRAVIS_OS_NAME}" = "osx" ]; then
-      brew update && brew install homebrew/science/hdf5 && brew tap awsteiner/science && which autoconf && brew install o2scl --HEAD -v && make rel && make nr && nr check && rel check ;
+      brew update && brew install homebrew/science/hdf5 && brew tap awsteiner/science && which autoconf && brew install o2scl --HEAD -v && make nr && make rel && make check;
     fi
 
 notifications:
