@@ -4,11 +4,11 @@ ifeq ($(USER),awsteiner)
 else
 
 GSL_INC = .
-O2SCL_INC = .
+O2SCL_INC = /usr/local/include
 EIGEN_INC = .
 HDF5_INC = .
 GSL_LIB = .
-O2SCL_LIB = .
+O2SCL_LIB = /usr/local/lib
 HDF5_LIB = .
 
 endif
