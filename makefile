@@ -47,5 +47,6 @@ doc: empty
 		'{print "<a href=\"http://github.com/awsteiner/seminf/tree/" $$1 "\">" $$1 "</a>"}' \
 		 > doc/rev.txt
 	cd doc; doxygen doxyfile
+	sudo cp -r doc/html/* $(STATIC_DOC_DIR)/seminf
 
 empty:
