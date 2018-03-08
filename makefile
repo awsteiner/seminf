@@ -1,4 +1,12 @@
 
+help:
+	@echo "nr: "
+	@echo "rel: "
+	@echo "clean: "
+	@echo "check: "
+	@echo "doc: "
+	@echo "sync-doc: "
+
 ifeq ($(USER),awsteiner)
 
 else
@@ -43,10 +51,24 @@ check:
 	tail -n 2 check_rel.scr
 
 doc: empty
+# Copy most recent tag files
+	cd doc; cp ~/o2scl/doc/o2scl/o2scl.tag .
+	cd doc; cp ~/o2scl/doc/o2scl/part/o2scl_part.tag .
+	cd doc; cp ~/o2scl/doc/o2scl/eos/o2scl_eos.tag .
+# Get most recent commit hash
 	git rev-parse HEAD | awk \
-		'{print "<a href=\"http://github.com/awsteiner/seminf/tree/" $$1 "\">" $$1 "</a>"}' \
-		 > doc/rev.txt
+		'{print "`" $$1 " <http://github.com/awsteiner/seminf/tree/" $$1 ">`_"}' \
+		 > sphinx/commit.rst
+# Parse bibliography
+	cd sphinx/static; cat bib_header.txt > ../bib.rst
+	cd sphinx/static; btmanip -parse seminf.bib -rst ../bib_temp.rst
+	cd sphinx; cat bib_temp.rst >> bib.rst; rm -f bib_temp.rst
+# Run Doxygen
 	cd doc; doxygen doxyfile
-	sudo cp -r doc/html/* $(STATIC_DOC_DIR)/seminf
+# Run sphinx
+	cd sphinx; make html
+
+sync-doc:
+	sudo cp -r sphinx/build/html/* $(STATIC_DOC_DIR)/seminf
 
 empty:

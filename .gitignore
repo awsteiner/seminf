@@ -4,3 +4,5 @@ nr
 *.o
 rel
 .travis.yml~
+doc/xml
+sphinx/build
