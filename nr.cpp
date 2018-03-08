@@ -917,25 +917,25 @@ protected:
   int ndripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, munleft, munright;
 
-    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
+    if (sx[0]<0.0 || sx[1]<0.0 || sx[2]<0.0) return 1;
 
-    neutron.n=sx[1];
-    proton.n=sx[2];
-    sy[1]=proton.n-protfrac*(proton.n+neutron.n);
+    neutron.n=sx[0];
+    proton.n=sx[1];
+    sy[0]=proton.n-protfrac*(proton.n+neutron.n);
   
     eos->calc_e(neutron,proton,hb);
     pleft=hb.pr;
     munleft=neutron.mu;
 
-    neutron.n=sx[3];
+    neutron.n=sx[2];
     proton.n=0.0;
   
     eos->calc_e(neutron,proton,hb);
     pright=hb.pr;
     munright=neutron.mu;
 
-    sy[2]=pleft-pright;
-    sy[3]=munleft-munright;
+    sy[1]=pleft-pright;
+    sy[2]=munleft-munright;
 
     return 0;
   }
@@ -945,25 +945,25 @@ protected:
   int pdripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, mupleft, mupright;
 
-    if (sx[1]<0.0 || sx[2]<0.0 || sx[3]<0.0) return 1;
+    if (sx[0]<0.0 || sx[1]<0.0 || sx[2]<0.0) return 1;
 
-    neutron.n=sx[1];
-    proton.n=sx[2];
-    sy[1]=proton.n-protfrac*(proton.n+neutron.n);
+    neutron.n=sx[0];
+    proton.n=sx[1];
+    sy[0]=proton.n-protfrac*(proton.n+neutron.n);
   
     eos->calc_e(neutron,proton,hb);
     pleft=hb.pr;
     mupleft=proton.mu;
 
     neutron.n=0.0;
-    proton.n=sx[3];
+    proton.n=sx[2];
   
     eos->calc_e(neutron,proton,hb);
     pright=hb.pr;
     mupright=proton.mu;
 
-    sy[2]=pleft-pright;
-    sy[3]=mupleft-mupright;
+    sy[1]=pleft-pright;
+    sy[2]=mupleft-mupright;
 
     return 0;
   }
@@ -1185,7 +1185,7 @@ public:
     double r0=cbrt(0.75/pi/ n0half);
 
     pflist=new double[2];
-    pflist[0]=0.45;
+    pflist[0]=0.35;
     pflist[1]=0.46;
     npf=2;
   
@@ -1208,7 +1208,7 @@ public:
       nndrip=0.0;
       npdrip=0.0;
 
-      if (mun> neutron.m) {
+      if (mun>neutron.m) {
 	cout << "Neutron drip" << endl;
 
 	sx[0]=neutron.n;
@@ -1239,7 +1239,7 @@ public:
 
       }
 
-      if (mup> proton.m) {
+      if (mup>proton.m) {
 	cout << "Proton drip" << endl;
 
 	sx[0]=neutron.n;
