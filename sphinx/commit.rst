@@ -1,1 +1,1 @@
-`26aa0ffeceea2b34e2849c4aee7c4ebf3c2e02a2 <http://github.com/awsteiner/seminf/tree/26aa0ffeceea2b34e2849c4aee7c4ebf3c2e02a2>`_
+`b9511e8510bf25d797237fcd72a9e98bccfb4fc8 <http://github.com/awsteiner/seminf/tree/b9511e8510bf25d797237fcd72a9e98bccfb4fc8>`_
