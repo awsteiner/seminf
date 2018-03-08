@@ -57,6 +57,7 @@ using namespace o2scl_hdf;
     code. This allows calculation down to really low proton fractions!
     We need to see if this is consistent with the analytic code for
     both Qnn<Qnp (hard) and Qnn>Qnp (probably works).
+
 */
 class seminf_nr {
   
@@ -128,11 +129,11 @@ protected:
 
   /// Nonlinear equation solver
   mroot_hybrids<mm_funct,si_vector_t,si_matrix_t,jac_funct> nd;
-  /// Desc
+  /// Neutron drip density
   double nnrhs;
-  /// Desc
+  /// Proton drip density
   double nprhs;
-  /// Desc
+  /// Size of the low-density surface region
   double rhslength;
 
   /// If true, we have good boundary conditions
@@ -140,14 +141,14 @@ protected:
   /// Initial derivative for densities on LHS (typically negative)
   double firstderiv;
 
-  /** \brief Desc
+  /** \brief Desc (default 3)
    */
   double big;
-  /** \brief The grid size
+  /** \brief The grid size (default 100)
    */
   int ngrid;
 
-  /// \name Desc
+  /// \name Storage for the solution
   //@{
   si_vector_t xstor;
   si_matrix_t ystor;
@@ -267,10 +268,10 @@ protected:
 	}
       } else {
 	if (model!="apr" && model!="gp") {
-	  rhsn=(neutron.mu-mun)/ qnn;
+	  rhsn=(neutron.mu-mun)/qnn;
 	  rhsp=0.0;
 	} else {
-	  rhsn=(neutron.mu-mun+0.5*dqnndnn*sy[2]*sy[2])/ qnn;
+	  rhsn=(neutron.mu-mun+0.5*dqnndnn*sy[2]*sy[2])/qnn;
 	  rhsp=0.0;
 	}
       }
@@ -580,7 +581,11 @@ protected:
       cout << "second solve: " << nndrip << endl;
       
       if (nndrip>0.0) {
-	O2SCL_ERR("Neutron drip not yet supported.",exc_eunimpl);
+	oit.tol_rel=relaxconverge;
+	oit.verbose=1;
+	oit.niter=60;
+	oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
+		  A,rhs,dy);
       } else {
 	oit.tol_rel=relaxconverge;
 	oit.verbose=1;
@@ -829,6 +834,7 @@ protected:
       rel->rp=&rp;
     
       if (pf_index==1) {
+
 	//----------------------------------------------
 	// Construct a simple linear guess
       
@@ -848,6 +854,7 @@ protected:
 	  }
 	}
       } else {
+
 	//----------------------------------------------
 	// Use last solution for guess
       
@@ -1182,12 +1189,25 @@ public:
 
     // Compute saturation density
     n0half=eos->fn0(0.0,dtemp);
-    double r0=cbrt(0.75/pi/ n0half);
+    double r0=cbrt(0.75/pi/n0half);
 
-    pflist=new double[2];
+    pflist=new double[15];
     pflist[0]=0.35;
-    pflist[1]=0.46;
-    npf=2;
+    pflist[1]=0.36;
+    pflist[2]=0.37;
+    pflist[3]=0.38;
+    pflist[4]=0.39;
+    pflist[5]=0.40;
+    pflist[6]=0.41;
+    pflist[7]=0.42;
+    pflist[8]=0.43;
+    pflist[9]=0.44;
+    pflist[10]=0.45;
+    pflist[11]=0.46;
+    pflist[12]=0.47;
+    pflist[13]=0.48;
+    pflist[14]=0.49;
+    npf=15;
   
     for(pf_index=1;pf_index<=npf;pf_index++) {
       protfrac=pflist[pf_index-1];
@@ -1610,7 +1630,12 @@ public:
 		     at[0],(at.get_column("egrad")));
       thick=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		     at[0],(at.get_column("thickint")));
-      if (verbose>1) cout << "thick: " << thick << endl;
+      if (verbose>1) {
+	cout << "surf: " << surf << endl;
+	cout << "thick: " << thick << endl;
+	cout << "sbulk: " << sbulk << endl;
+	cout << "sgrad: " << sgrad << endl;
+      }
       if (fabs(protfrac-0.5)>1.0e-8) {
 	wd=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
 		    at[0],(at.get_column("wdint")));
@@ -1624,6 +1649,11 @@ public:
 	w0jl=0.0;
 	wdjl=0.0;
 	sssv_jim=0.0;
+	if (verbose>1) {
+	  cout << "wd: " << wd << endl;
+	  cout << "wd2: " << wd2 << endl;
+	  cout << "sssv_drop: " << sssv_drop << endl;
+	}
       
       }
     
