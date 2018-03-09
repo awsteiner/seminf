@@ -37,20 +37,66 @@ using namespace o2scl_hdf;
 /** \brief Semi-infinite nuclear matter for nonrelativistic
     models in the Thomas-Fermi approximation
 
+    Given a energy density functional separated into
+    bulk and gradient terms
+    \f[
+    \varepsilon(n_n,n_p,\nabla n_n,\nabla n_p ) = 
+    \varepsilon_{\mathrm{bulk}}(n_n,n_p) +
+    \frac{Q_{nn}}{2} \left( \nabla n_n \right)^2 +
+    \frac{Q_{pp}}{2} \left( \nabla n_p \right)^2 +
+    Q_{np} \nabla n_n \nabla n_p 
+    \f]
+    one can minimize the thermodynamic potential
+    \f[
+    \Omega = \int \left(-P\right) dV
+    \f]
+    to obtain the neutron and proton density profiles. 
+    The Euler-Lagrange equations are 
+    \f[
+    Q_{nn} \nabla^2 n_n + Q_{np} \nabla^2 n_p -
+    \frac{1}{2} \left[ 
+    \frac{\partial Q_{nn}}{\partial n_n} \left(\nabla n_n\right)^2 +
+    \frac{\partial Q_{np}}{\partial n_n} \nabla n_n \nabla n_p +
+    \frac{\partial Q_{pp}}{\partial n_n} \left(\nabla n_p\right)^2 +
+    \right] = \frac{f_{\mathrm{bulk}}}{n_n} - \mu_{n,0}
+    \f]
+    and a second equation with \f$ n \leftrightarrow p \f$,
+    where \f$ f_{\mathrm{bulk}} = \varepsilon_{\mathrm{bulk}} - 
+    T s_{\mathrm{bulk}} \f$ and \f$ \mu_{n,0} \f$ is a constant.
+    
+    In the
+    semi-infinite matter approximation with a single coordinate,
+    \f$ x \f$,
+    the E-L equations become
+    \f{eqnarray}
+    Q_{nn} n_n^{\prime \prime} + Q_{np} n_p^{\prime \prime} = 
+    \mu_n - \mu_{n,0} \nonumber \\
+    Q_{np} n_n^{\prime \prime} + Q_{pp} n_p^{\prime \prime} = 
+    \mu_p - \mu_{p,0}
+    \f}
+
+    The surface tension is 
+    \f{eqnarray}
+    \omega &=& \int_{-\infty}^{\infty} 
+    \left( f - \mu_{n,0} n_n - \mu_{p,0} n_p \right) dx
+    \nonumber \\
+    \omega &=& 2 \int_{-\infty}^{\infty} 
+    \left( f_{\mathrm{bulk}} - \mu_{n,0} n_n - 
+    \mu_{p,0} n_p \right) dx
+    \f]
+
     In neutron-rich matter, the proton density vanishes while the
-    neutron density extends out to \f$ z \rightarrow \infty \f$. In
+    neutron density extends out to \f$ x \rightarrow \infty \f$. In
     order to handle this, the algorithm separates the solution into
     two intervals: the first where the proton density is non-zero, and
     the second where the proton density is zero. These two solutions
     are then pasted together to create the final table.
     
-    \warning Does not work with dripped nucleons yet.
-    
     \note The first proton fraction cannot be 0.5, as the 
     algorithm cannot handle later values different from 0.5
     
     12/15/03 - Implemented a new solution method for Qnn!=Qnp for when
-    nndrip becomes > 0. It seems that in this case, it is better not
+    nn_drip becomes > 0. It seems that in this case, it is better not
     to automatically adjust the scale of the x-axis, but use a gradual
     broadening similar to what we have done using the relativistic
     code. This allows calculation down to really low proton fractions!
@@ -90,7 +136,7 @@ protected:
   
   /** \brief Desc
    */
-  bool showrelax;
+  bool show_relax;
   
   /** \brief Desc
    */
@@ -126,16 +172,16 @@ protected:
   thermo hb;
 
   /// If true, output relaxation iterations (default false)
-  bool relaxfile;
+  bool relax_file;
   
   /// If true, \f$ Q_{nn}=Q_{np} \f$
   bool qnn_equals_qnp;
   
   /// If true, match to exponential decay on the RHS
-  bool rhsmode;
+  bool low_dens_part;
   
   /// Minimum err
-  double minerr;
+  double min_err;
   
   /// Desc
   double monfact;
@@ -144,10 +190,10 @@ protected:
   double expo;
   
   /// Neutron drip density
-  double nndrip;
+  double nn_drip;
   
   /// Proton drip density
-  double npdrip;
+  double np_drip;
   
   /// Desc (default false)
   bool flatden;
@@ -162,13 +208,13 @@ protected:
   double nprhs;
   
   /// Size of the low-density surface region
-  double rhslength;
+  double rhs_length;
 
   /// If true, we have good boundary conditions
   bool goodbound;
   
   /// Initial derivative for densities on LHS (typically negative)
-  double firstderiv;
+  double first_deriv;
 
   /** \brief Desc (default 3.0)
    */
@@ -194,11 +240,11 @@ protected:
 
   /** \brief Desc
    */
-  double relaxconverge;
+  double relax_converge;
 
   /** \brief Desc
    */
-  double rhsmin;
+  double rhs_min;
 
   /** \brief The step size factor for constructing the initial 
       guess (default 7.0)
@@ -208,8 +254,11 @@ protected:
   /// Integrator to compute integrals of final solution
   inte_qagiu_gsl<> gl2;
 
-  /// Store the solution
-  table<> at;
+  /// Store the profiles
+  table_units<> tab_prof;
+  
+  /// Store results across several profiles
+  table_units<> tab_summ;
 
   /// \name Nucleon-nucleon interactions
   //@{
@@ -219,10 +268,10 @@ protected:
   eos_had_schematic eosp;
   //@}
 
-  /// To compute derivatives
+  /// To compute derivatives (currently unused)
   deriv_gsl<> df;
   
-  /** \brief Desc
+  /** \brief The differential equations to be solved
    */
   int derivs(double sx, const si_vector_t &sy, si_vector_t &dydx) {
     double rhsn, rhsp=0.0, det;
@@ -232,7 +281,7 @@ protected:
     proton.n=sy[1];
     if (model=="APR") {
       eosa.gradient_qij2(neutron.n,proton.n,qnn,qnp,qpp,
-			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
+			 dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
     }
     if (model=="gp") {
       thermo thth;
@@ -280,7 +329,7 @@ protected:
       }
       dydx[3]=0.0;
     } else {
-      if (rhsmode==false) {
+      if (low_dens_part==false) {
 	if (model!="APR" && model!="gp") {
 	  det=qnn*qpp-qnp*qnp;
 	  rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
@@ -290,13 +339,13 @@ protected:
 	} else {
 	  det=qnn*qpp-qnp*qnp;
 	  rhsn=(neutron.mu-mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-		 dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qpp-
+		dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qpp-
 	    (proton.mu-mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-	      dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnp;
+	     dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnp;
 	  rhsp=(proton.mu-mup+0.5*dqnndnp*sy[2]*sy[2]-dqnpdnn*sy[2]*sy[2]-
-		 dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnn-
+		dqppdnn*sy[2]*sy[3]-0.5*dqppdnp*sy[3]*sy[3])*qnn-
 	    (neutron.mu-mun-0.5*dqnndnn*sy[2]*sy[2]+dqnndnp*sy[2]*sy[3]-
-	      dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qnp;
+	     dqnpdnp*sy[3]*sy[3]+0.5*dqppdnn*sy[3]*sy[3])*qnp;
 	  rhsn/=det;
 	  rhsp/=det;
 	}
@@ -368,7 +417,8 @@ protected:
        std::placeholders::_3);   
     ode_it_solve<ode_it_funct,si_vector_t,si_matrix_t,si_matrix_row_t,
 		 si_vector_t,si_sp_matrix_t> oit;
-
+    oit.niter=60;
+    
 #ifdef USE_EIGEN
     o2scl_linalg::linear_solver_eigen_colQR
       <Eigen::VectorXd,Eigen::MatrixXd> sol;
@@ -386,8 +436,8 @@ protected:
       xstor[1]=0.0;
       ystor(1,1)=nn_left;
       ystor(2,1)=np_left;
-      ystor(3,1)=firstderiv;
-      ystor(4,1)=firstderiv;
+      ystor(3,1)=first_deriv;
+      ystor(4,1)=first_deriv;
       dx=initialstep/((double)ngrid);
     
       if (debug>0) {
@@ -409,7 +459,7 @@ protected:
 	  ystor(j,i)=ystor(j,i-1)+dx*dydx[j-1];
 	}
       
-	if (ystor(1,i)<nndrip || ystor(2,i)<npdrip) {
+	if (ystor(1,i)<nn_drip || ystor(2,i)<np_drip) {
 	  guessdone=true;
 	  ilast=i-1;
 	  i=ngrid+10;
@@ -422,7 +472,7 @@ protected:
       }
 
       // If ilast wasn't set, then nn and np never became smaller than
-      // nndrip or npdrip. In that case, just use the entire guess.
+      // nn_drip or np_drip. In that case, just use the entire guess.
       if (ilast==0) ilast=100;
     
       //----------------------------------------------
@@ -465,7 +515,7 @@ protected:
     //----------------------------------------------
     // Try ode_it_solve
 
-    rhsmode=false;
+    low_dens_part=false;
 
     if (debug>0) {
       for(int i=0;i<ngrid;i+=9) {
@@ -483,7 +533,7 @@ protected:
     //----------------------------------------------
     // Solve
 
-    oit.tol_rel=relaxconverge;
+    oit.tol_rel=relax_converge;
     oit.verbose=1;
     oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
 	      A,rhs,dy);
@@ -523,18 +573,18 @@ protected:
     // Store quantites at rhs for later use
 
     xrhs=ox[ngrid-1];
-    if (npdrip==0.0) {
+    if (np_drip==0.0) {
       nnrhs=oy(ngrid-1,0);
       cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
-      if (nnrhs<rhsmin) {
-	nnrhs=rhsmin;
+      if (nnrhs<rhs_min) {
+	nnrhs=rhs_min;
 	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
       }
     } else {
       nprhs=oy(ngrid-1,1);
       cout << "RHS, nprhs=" << nprhs << endl;
-      if (nprhs<rhsmin) {
-	nprhs=rhsmin;
+      if (nprhs<rhs_min) {
+	nprhs=rhs_min;
 	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
       }
     }
@@ -542,11 +592,11 @@ protected:
     //----------------------------------------------
     // Store solution and delete seminf_si_relax
 
-    at.set_nlines(ngrid);
+    tab_prof.set_nlines(ngrid);
     for(int i=0;i<ngrid;i++) {
-      at.set(0,i,ox[i]);
+      tab_prof.set(0,i,ox[i]);
       for(int j=0;j<5;j++) {
-	at.set(j+1,i,oy(i,j));
+	tab_prof.set(j+1,i,oy(i,j));
       }
     }
 
@@ -555,24 +605,24 @@ protected:
     
     if (fabs(protfrac-0.5)>1.0e-4) {
 
-      at.set_nlines(ngrid*2-1);
+      tab_prof.set_nlines(ngrid*2-1);
 
       if (pf_index==1) {
 
 	//----------------------------------------------
 	// Construct a simple linear guess
       
-	if (npdrip==0.0) {
+	if (np_drip==0.0) {
 	  for(int i=0;i<ngrid;i++) {
 	    ox[i]=((double)i)/((double)(ngrid-1));
-	    oy(i,0)=(nnrhs-nndrip)*(1.0-ox[i])+nndrip;
+	    oy(i,0)=(nnrhs-nn_drip)*(1.0-ox[i])+nn_drip;
 	    oy(i,1)=-0.08*(1.0-ox[i]);
 	    oy(i,2)=0.001;
 	  }
 	} else {
 	  for(int i=0;i<ngrid;i++) {
 	    ox[i]=((double)i)/((double)(ngrid-1));
-	    oy(i,0)=(nprhs-npdrip)*(1.0-ox[i])+npdrip;
+	    oy(i,0)=(nprhs-np_drip)*(1.0-ox[i])+np_drip;
 	    oy(i,1)=-0.08*(1.0-ox[i]);
 	    oy(i,2)=0.001;
 	  }
@@ -611,21 +661,13 @@ protected:
 	}
       }
       
-      rhsmode=true;
-      cout << "second solve: " << nndrip << endl;
+      low_dens_part=true;
+      cout << "second solve, nn_drip: " << nn_drip << endl;
       
-      if (nndrip>0.0) {
-	oit.tol_rel=relaxconverge;
-	oit.verbose=1;
-	oit.niter=60;
-	oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
-		  A,rhs,dy);
-      } else {
-	oit.tol_rel=relaxconverge;
-	oit.verbose=1;
-	oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
-		  A,rhs,dy);
-      }
+      oit.tol_rel=relax_converge;
+      oit.verbose=1;
+      oit.solve(ngrid,n_eq,n_b,ox,oy,f_derivs,f_left,f_right,
+		A,rhs,dy);
 
       if (debug>0) {
 	for(int i=0;i<ngrid;i+=9) {
@@ -654,9 +696,9 @@ protected:
       // Store solution and delete seminf_si_relax
       
       for(int i=0;i<ngrid;i++) {
-	at.set(0,i+ngrid-1,ox(i));
+	tab_prof.set(0,i+ngrid-1,ox(i));
 	for(int j=0;j<3;j++) {
-	  at.set(j+1,i+ngrid-1,oy(i,j));
+	  tab_prof.set(j+1,i+ngrid-1,oy(i,j));
 	}
       }
       //delete rel;
@@ -664,25 +706,25 @@ protected:
       //----------------------------------------------
       // Rearrangment and rescaling
 
-      if (npdrip==0.0) {
+      if (np_drip==0.0) {
 	for(int i=ngrid-1;i<2*ngrid-1;i++) {
-	  at.set(5,i,at.get(3,i));
-	  at.set(4,i,0.0);
-	  at.set(3,i,at.get(2,i));
-	  at.set(2,i,0.0);
-	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
+	  tab_prof.set(5,i,tab_prof.get(3,i));
+	  tab_prof.set(4,i,0.0);
+	  tab_prof.set(3,i,tab_prof.get(2,i));
+	  tab_prof.set(2,i,0.0);
+	  tab_prof.set(0,i,tab_prof.get(0,i)*tab_prof.get(5,i)+xrhs);
 	}
       } else {
 	for(int i=1;i<=ngrid;i++) {
-	  at.set(5,i,at.get(3,i));
-	  at.set(4,i,at.get(2,i));
-	  at.set(3,i,0.0);
-	  at.set(2,i,at.get(1,i));
-	  at.set(1,i,0.0);
-	  at.set(0,i,at.get(0,i)*at.get(5,i)+xrhs);
+	  tab_prof.set(5,i,tab_prof.get(3,i));
+	  tab_prof.set(4,i,tab_prof.get(2,i));
+	  tab_prof.set(3,i,0.0);
+	  tab_prof.set(2,i,tab_prof.get(1,i));
+	  tab_prof.set(1,i,0.0);
+	  tab_prof.set(0,i,tab_prof.get(0,i)*tab_prof.get(5,i)+xrhs);
 	}
       }
-      //    at.set_nlines(2*ngrid-1);
+      //    tab_prof.set_nlines(2*ngrid-1);
     }
 
     if (debug>0) {
@@ -692,7 +734,7 @@ protected:
 	cout.width(3);
 	cout << i << " ";
 	for(int j=0;j<6;j++) {
-	  cout << at.get(j,i) << " ";
+	  cout << tab_prof.get(j,i) << " ";
 	}
 	cout << endl;
 	cout.precision(6);
@@ -728,7 +770,7 @@ protected:
     if (pf_index==1) {
       xstor[1]=0.0;
       ystor(1,1)=nn_left+np_left;
-      ystor(2,1)=firstderiv;
+      ystor(2,1)=first_deriv;
       dx=initialstep/((double)ngrid);
     
       guessdone=false;
@@ -748,7 +790,7 @@ protected:
 	ystor(1,i)=ystor(1,i-1)+dx*ystor(2,i-1);
 	ystor(2,i)=ystor(2,i-1)+dx*(neutron.mu-mun)/(qnn);
       
-	if (sx[2]<nndrip+npdrip+1.0e-6 || ystor(2,i)>0.0) {
+	if (sx[2]<nn_drip+np_drip+1.0e-6 || ystor(2,i)>0.0) {
 	  guessdone=true;
 	  ilast=i-1;
 	  i=ngrid+10;
@@ -796,8 +838,8 @@ protected:
     //----------------------------------------------
     // Solve
 
-    rhsmode=false;
-    int relret1=rel->solve(relaxconverge,1.0);
+    low_dens_part=false;
+    int relret1=rel->solve(relax_converge,1.0);
   
     //----------------------------------------------
     // Copy solution for next guess
@@ -813,7 +855,7 @@ protected:
     // Rescale solution and set neutron and proton
     // densities:
 
-    at.set_nlines(ngrid);
+    tab_prof.set_nlines(ngrid);
     for(int i=1;i<=rel->ngrid;i++) {
 
       sx[1]=(1.0-protfrac)*rel->y(1,i);
@@ -827,30 +869,30 @@ protected:
 	 std::placeholders::_2,std::placeholders::_3);
       nd.msolve(2,sx,qqf);
 
-      at.set(0,i-1,rel->x[i]*rel->y(3,i));
-      at.set(1,i-1,sx[1]);
-      at.set(2,i-1,sx[2]);
-      at.set(3,i-1,rel->y(2,i));
-      at.set(4,i-1,0.0);
-      at.set(5,i-1,rel->y(3,i));
+      tab_prof.set(0,i-1,rel->x[i]*rel->y(3,i));
+      tab_prof.set(1,i-1,sx[1]);
+      tab_prof.set(2,i-1,sx[2]);
+      tab_prof.set(3,i-1,rel->y(2,i));
+      tab_prof.set(4,i-1,0.0);
+      tab_prof.set(5,i-1,rel->y(3,i));
     }
 
     //----------------------------------------------
     // Store quantites at rhs for later use:
   
-    xrhs=at[0][ngrid-1];
-    if (npdrip==0.0) {
-      nnrhs=at[1][ngrid-1];
+    xrhs=tab_prof[0][ngrid-1];
+    if (np_drip==0.0) {
+      nnrhs=tab_prof[1][ngrid-1];
       cout << "RHS, nnrhs=" << xrhs << " " << nnrhs << endl;
-      if (nnrhs<rhsmin) {
-	nnrhs=rhsmin;
+      if (nnrhs<rhs_min) {
+	nnrhs=rhs_min;
 	cout << "Adjusting nnrhs to nnrhs=" << nnrhs << endl;
       }
     } else {
-      nprhs=at[2][ngrid-1];
+      nprhs=tab_prof[2][ngrid-1];
       cout << "RHS, nprhs=" << nprhs << endl;
-      if (nprhs<rhsmin) {
-	nprhs=rhsmin;
+      if (nprhs<rhs_min) {
+	nprhs=rhs_min;
 	cout << "Adjusting nprhs to nprhs=" << nprhs << endl;
       }
     }
@@ -872,17 +914,17 @@ protected:
 	//----------------------------------------------
 	// Construct a simple linear guess
       
-	if (npdrip==0.0) {
+	if (np_drip==0.0) {
 	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
-	    rel->y(1,i)=(nnrhs-nndrip)*(1.0-rel->x[i])+nndrip;
+	    rel->y(1,i)=(nnrhs-nn_drip)*(1.0-rel->x[i])+nn_drip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
 	    rel->y(3,i)=0.001;
 	  }
 	} else {
 	  for(int i=1;i<=ngrid;i++) {
 	    rel->x[i]=((double)(i-1))/((double)(ngrid-1));
-	    rel->y(1,i)=(nprhs-npdrip)*(1.0-rel->x[i])+npdrip;
+	    rel->y(1,i)=(nprhs-np_drip)*(1.0-rel->x[i])+np_drip;
 	    rel->y(2,i)=-0.08*(1.0-rel->x[i]);
 	    rel->y(3,i)=0.001;
 	  }
@@ -904,8 +946,8 @@ protected:
       //----------------------------------------------
       // Solve
     
-      rhsmode=true;
-      int relret2=rel->solve(relaxconverge,1.0);
+      low_dens_part=true;
+      int relret2=rel->solve(relax_converge,1.0);
     
       //----------------------------------------------
       // Copy solution for next guess
@@ -920,14 +962,14 @@ protected:
       //----------------------------------------------
       // Store solution, rescale, and delete seminf_si_relax
     
-      at.set_nlines(2*ngrid-1);
+      tab_prof.set_nlines(2*ngrid-1);
       for(int i=1;i<=rel->ngrid;i++) {
-	at.set(5,i-2+ngrid,rel->y(3,i));
-	at.set(3,i-2+ngrid,rel->y(2,i));
-	at.set(4,i-2+ngrid,0.0);
-	at.set(2,i-2+ngrid,0.0);
-	at.set(1,i-2+ngrid,rel->y(1,i));
-	at.set(0,i-2+ngrid,rel->x[i]*rel->y(3,i)+xrhs);
+	tab_prof.set(5,i-2+ngrid,rel->y(3,i));
+	tab_prof.set(3,i-2+ngrid,rel->y(2,i));
+	tab_prof.set(4,i-2+ngrid,0.0);
+	tab_prof.set(2,i-2+ngrid,0.0);
+	tab_prof.set(1,i-2+ngrid,rel->y(1,i));
+	tab_prof.set(0,i-2+ngrid,rel->x[i]*rel->y(3,i)+xrhs);
       }
       delete rel;
     }
@@ -953,8 +995,9 @@ protected:
     return 0;
   }
 
-  /** \brief Desc
-   */
+  /** \brief Compute the boundary densities in the case of 
+      a neutron drip
+  */
   int ndripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, munleft, munright;
 
@@ -981,8 +1024,9 @@ protected:
     return 0;
   }
 
-  /** \brief Desc
-   */
+  /** \brief Compute the boundary densities in the case of 
+      a proton drip
+  */
   int pdripfun(size_t sn, const si_vector_t &sx, si_vector_t &sy) {
     double pleft, pright, mupleft, mupright;
 
@@ -1009,10 +1053,10 @@ protected:
     return 0;
   }
 
-  /** \brief Future function for \ref o2scl::ode_it_solve
+  /** \brief Reformat differential equations for \ref o2scl::ode_it_solve
    */
   double difeq(size_t ieq, double x, si_matrix_row_t &y) {
-    if (rhsmode==false) {
+    if (low_dens_part==false) {
       si_vector_t y2=y, dydx(5);
       derivs(x,y2,dydx);
       if (ieq==0) {
@@ -1044,19 +1088,19 @@ protected:
     return 0.0;
   }
 
-  /** \brief Future function for \ref o2scl::ode_it_solve
+  /** \brief LHS boundary conditions for \ref o2scl::ode_it_solve
    */
   double left(size_t ieq, double x, si_matrix_row_t &y) {
 
-    if (rhsmode==false) {
+    if (low_dens_part==false) {
       
       double delta=nn_left*monfact/exp(big*expo);
       double epsi=delta*(-dmundn+qnn*expo*expo)/
 	(dmundp-qnp*expo*expo);
       
       if (epsi*delta<0.0) {
-	cout << "epsi and delta have different signs" << endl;
-	exit(-1);
+	O2SCL_ERR("Variables 'epsi' and 'delta' have different signs.",
+		  o2scl::exc_efailed);
       }
       
       double ret;
@@ -1073,19 +1117,26 @@ protected:
       
     }
 
-    // If rhsmode is true
+    // If low_dens_part is true, then the only boundary condition is
+    // that the neutron density on the LHS match that from the RHS of
+    // the high-density part of the solution
     return y[0]-nnrhs;
   }
 
-  /** \brief Future function for \ref o2scl::ode_it_solve
+  /** \brief RHS boundary conditions for \ref o2scl::ode_it_solve
    */
   double right(size_t ieq, double x, si_matrix_row_t &y) {
-    if (rhsmode==false) {
+    // If low_dens_part is false, then the right hand boundary condition is
+    // that the proton density vanishes.
+    if (low_dens_part==false) {
       return y[1];
     }
-    // If rhsmode is true
+    // If low_dens_part is true, then the two boundary conditions are that
+    // the neutron density goes to the drip density and the derivative
+    // of the neutron density vanishes.
     if (ieq==0) {
-      return y[0]-nndrip*(1.0+rhs_adjust);
+      if (force_vacuum) return y[0]-rhs_adjust;
+      return y[0]-nn_drip*(1.0+rhs_adjust);
     }
     return y[1];
   }
@@ -1093,7 +1144,7 @@ protected:
 public:
   
   seminf_nr() {
-    rhslength=2.0;
+    rhs_length=2.0;
     big=3.0;
     ngrid=100;
     xg1.resize(ngrid+1);
@@ -1103,6 +1154,14 @@ public:
     rhs_adjust=0.0;
     model="NRAPR";
     out_file="nr.o2";
+    min_err=1.0e-6;
+    relax_converge=1.0e-9;
+    show_relax=true;
+    relax_file=false;
+    first_deriv=-2.0e-4;
+    rhs_min=1.0e-7;
+    monfact=0.002;
+    force_vacuum=false;
   }
 
   /// Adjustment for RHS boundary
@@ -1113,9 +1172,13 @@ public:
   
   /// Name of output file
   string out_file;
+
+  /// Desc
+  bool force_vacuum;
   
-  /** \brief Desc
-   */
+  /** \brief Calculate nucleon profiles for a list of proton 
+      fractions
+  */
   int calc(std::vector<std::string> &sv, bool itive_com) {
     
     double lex1;
@@ -1138,8 +1201,10 @@ public:
     vector<double> pflist;
     si_vector_t sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0;
+
     // Locations of fixed relative densities
     double xn[3], xp[3];
+    
     double thick;
     int npf;
     double lon, lop, hin, hip, sqt;
@@ -1182,9 +1247,9 @@ public:
     }
   
     //--------------------------------------------
-    // Test if Qnn=Qnp
+    // Test if Qnn == Qnp
 
-    if (model!="gp" && model!="apr" && fabs(qnn-qnp)<1.0e-7) {
+    if (model!="gp" && model!="APR" && fabs(qnn-qnp)<1.0e-7) {
       qnn_equals_qnp=true;
       cout << "Qnn=Qnp" << endl;
       if (true) {
@@ -1199,25 +1264,22 @@ public:
     }
     cout << endl;
   
-    flatden=false;
-
     //--------------------------------------------
 
-    at.set_nlines(ngrid*2);
-    at.line_of_names(((string)"x nn np nnp npp scale rho alpha ")+
-		     "ebulk egrad esurf thickint wdint wd2int");
+    flatden=false;
 
+    // Initialize table
+    tab_prof.set_nlines(ngrid*2);
+    tab_prof.line_of_names(((string)"x nn np nnp npp scale rho alpha ")+
+			   "ebulk egrad esurf thickint wdint wd2int");
+
+    tab_summ.line_of_names("pf wd wd2");
+
+    // Allocate storage
     xstor.resize(ngrid+1);
     ystor.resize(5+1,ngrid+1);
 
-    minerr=1.0e-6;
-    relaxconverge=1.0e-9;
-    showrelax=true;
-    relaxfile=false;
-    firstderiv=-2.0e-4;
-    rhsmin=1.0e-7;
-    monfact=0.002;
-
+    // Initialize particles and EOS
     neutron.init(o2scl_settings.get_convert_units().convert
 		 ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
     proton.init(o2scl_settings.get_convert_units().convert
@@ -1227,23 +1289,28 @@ public:
     eos->set_n_and_p(neutron,proton);
     eos->set_thermo(hb);
 
-    // Compute saturation density
+    // Compute saturation density and r0 in symmetric matter
     n0half=eos->fn0(0.0,dtemp);
     double r0=cbrt(0.75/pi/n0half);
 
+    // Get list of proton fractions to compute
     pflist.resize(sv.size()-1);
     for(size_t k=0;k<pflist.size();k++) {
       pflist[k]=o2scl::stod(sv[k+1]);
     }
     npf=pflist.size();
-  
+
+    hdf_file hf;
+    
+    // Loop through proton fractions
     for(pf_index=1;pf_index<=npf;pf_index++) {
+      
       protfrac=pflist[pf_index-1];
 
       //------------------------------------------------------
       // Calculate properties of saturated nuclear matter with
-      // appropriate value of proton fraction including the
-      // possibility of drip particles if they exist
+      // appropriate value of proton fraction, including the
+      // possibility of drip particles if they exist.
       
       nsat=eos->fn0(1.0-2.0*protfrac,dtemp);
       np_left=nsat*protfrac;
@@ -1253,8 +1320,8 @@ public:
       eos->calc_e(neutron,proton,hb);
       mun=neutron.mu;
       mup=proton.mu;
-      nndrip=0.0;
-      npdrip=0.0;
+      nn_drip=0.0;
+      np_drip=0.0;
 
       if (mun>neutron.m) {
 	cout << "Neutron drip" << endl;
@@ -1271,8 +1338,7 @@ public:
 	nd.msolve(3,sx,ndf);
 	ndripfun(3,sx,sy);
 	if (fabs(sy[0])>1.0e-4 || fabs(sy[1])>1.0e-4 || fabs(sy[2])>1.0e-4) {
-	  cout << "Error in solution of ndripfun." << endl;
-	  exit(-1);
+	  O2SCL_ERR("Neutron drip solution failed.",o2scl::exc_efailed);
 	}
 
 	nn_left=sx[0];
@@ -1282,8 +1348,8 @@ public:
 	eos->calc_e(neutron,proton,hb);
 	mun=neutron.mu;
 	mup=proton.mu;
-	nndrip=sx[2];
-	npdrip=0.0;
+	nn_drip=sx[2];
+	np_drip=0.0;
 
       }
 
@@ -1301,8 +1367,7 @@ public:
 	nd.msolve(3,sx,pdf);
 	pdripfun(3,sx,sy);
 	if (fabs(sy[0])>1.0e-4 || fabs(sy[1])>1.0e-4 || fabs(sy[2])>1.0e-4) {
-	  cout << "Error in solution of pdripfun." << endl;
-	  exit(-1);
+	  O2SCL_ERR("Proton drip solution failed.",o2scl::exc_efailed);
 	}
 
 	nn_left=sx[0];
@@ -1310,8 +1375,8 @@ public:
 	eos->calc_e(neutron,proton,hb);
 	mun=neutron.mu;
 	mup=proton.mu;
-	nndrip=0.0;
-	npdrip=sx[2];
+	nn_drip=0.0;
+	np_drip=sx[2];
 
       }
 
@@ -1319,7 +1384,7 @@ public:
       cout << "Saturation density at x=" <<  protfrac << ": " <<  nsat 
 	   << endl;
       cout << "nn_left: " <<  nn_left << " np_left: " <<  np_left << endl;
-      cout << "nndrip: " << nndrip << " npdrip: " << npdrip << endl;
+      cout << "nn_drip: " << nn_drip << " np_drip: " << np_drip << endl;
 
       //--------------------------------------------
       // Calculate derivatives useful for the 
@@ -1360,10 +1425,10 @@ public:
       neutron.n=nn_left;
       proton.n=np_left;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1372,7 +1437,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1387,10 +1452,10 @@ public:
       neutron.n=nn_left-1.0e-4;
       proton.n=np_left;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1399,7 +1464,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1417,10 +1482,10 @@ public:
       neutron.n=nn_left;
       proton.n=np_left-1.0e-4;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1429,7 +1494,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1448,10 +1513,10 @@ public:
       neutron.n=1.0e-4;
       proton.n=1.0e-4;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1460,7 +1525,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1475,10 +1540,10 @@ public:
       neutron.n=1.0e-8;
       proton.n=1.0e-4;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1487,7 +1552,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1505,10 +1570,10 @@ public:
       neutron.n=1.0e-4;
       proton.n=1.0e-8;
       eos->calc_e(neutron,proton,hb);
-      if (model=="apr") {
+      if (model=="APR") {
 	eosa.gradient_qij2(neutron.n, proton.n, qnn, qnp, qpp,
-			    dqnndnn,dqnndnp,dqnpdnn,
-			    dqnpdnp,dqppdnn,dqppdnp);
+			   dqnndnn,dqnndnp,dqnpdnn,
+			   dqnpdnp,dqppdnn,dqppdnp);
       } 
       if (model=="gp") {
 	thermo thth;
@@ -1517,7 +1582,7 @@ public:
 			  dqnpdnp,dqppdnn,dqppdnp);
       } 
       det=qnn*qpp-qnp*qnp;
-      if (qnn_equals_qnp==true || (model=="apr" && fabs(det)<1.0e-5)) {
+      if (qnn_equals_qnp==true || (model=="APR" && fabs(det)<1.0e-5)) {
 	rhsn=(neutron.mu-mun)/ qpp/2.0;
 	rhsp=(proton.mu-mup)/ qnn/2.0;
       } else {
@@ -1535,7 +1600,7 @@ public:
       goodbound=true;
 
       sqt=sqrt(dndnl*dndnl-2.0*dpdpl*dndnl+dpdpl*dpdpl+
-		4.0*dndpl*dpdnl);
+	       4.0*dndpl*dpdnl);
       lex1=sqrt(2.0*(dndnl+dpdpl)+2.0*sqt)/2.0;
       lex2=sqrt(2.0*(dndnl+dpdpl)-2.0*sqt)/2.0;
 
@@ -1554,7 +1619,7 @@ public:
       }
 
       sqt=sqrt(dndnr*dndnr-2.0*dpdpr*dndnr+dpdpr*dpdpr+
-		4.0*dndpr*dpdnr);
+	       4.0*dndpr*dpdnr);
       rex1=-sqrt(2.0*(dndnr+dpdpr)+2.0*sqt)/2.0;
       rex2=-sqrt(2.0*(dndnr+dpdpr)-2.0*sqt)/2.0;
   
@@ -1582,17 +1647,16 @@ public:
 
       verbose=2;
       if (verbose>1) cout << "Lookups. " << endl;
-      cout << at.get_nlines() << endl;
 
       o2scl::interp<std::vector<double>,std::vector<double> > it(itp_linear);
       
       for(int i=0;i<3;i++) {
-	xn[i]=it.eval(nndrip+(nn_left-nndrip)/10.0*((double)(i*4+1)),
-		      at.get_nlines(),at.get_column("nn"),
-		      at.get_column("x"));
-	xp[i]=it.eval(npdrip+(np_left-npdrip)/10.0*((double)(i*4+1)),
-		      at.get_nlines(),at.get_column("np"),
-		      at.get_column("x"));
+	xn[i]=it.eval(nn_drip+(nn_left-nn_drip)/10.0*((double)(i*4+1)),
+		      tab_prof.get_nlines(),tab_prof.get_column("nn"),
+		      tab_prof.get_column("x"));
+	xp[i]=it.eval(np_drip+(np_left-np_drip)/10.0*((double)(i*4+1)),
+		      tab_prof.get_nlines(),tab_prof.get_column("np"),
+		      tab_prof.get_column("x"));
       }
       
       delta=1.0-2.0*protfrac;
@@ -1600,49 +1664,53 @@ public:
       hns=eos->fesym(barn);
 
       if (verbose>1) cout << "Integrands." << endl;
-      for(int i=0;i<((int)at.get_nlines());i++) {
+      for(int i=0;i<((int)tab_prof.get_nlines());i++) {
 	// Fix negative values
-	if (at[1][i]<0.0) at.set(1,i,0.0);
-	if (at[2][i]<0.0) at.set(2,i,0.0);
+	if (tab_prof[1][i]<0.0) tab_prof.set(1,i,0.0);
+	if (tab_prof[2][i]<0.0) tab_prof.set(2,i,0.0);
 
-	neutron.n=at[1][i];
-	proton.n=at.get(2,i);
+	neutron.n=tab_prof[1][i];
+	proton.n=tab_prof.get(2,i);
 
 	eos->calc_e(neutron,proton,hb);
 
-	if (model=="apr") {
+	if (model=="APR") {
 	  eosa.gradient_qij2(neutron.n,proton.n,qnn,qnp,qpp,
-			      dqnndnn,dqnndnp,dqnpdnn,
-			      dqnpdnp,dqppdnn,dqppdnp);
-	  at.set("qnn",i,qnn);
-	  at.set("qnp",i,qnp);
-	  at.set("qpp",i,qpp);
+			     dqnndnn,dqnndnp,dqnpdnn,
+			     dqnpdnp,dqppdnn,dqppdnp);
+	  tab_prof.set("qnn",i,qnn);
+	  tab_prof.set("qnp",i,qnp);
+	  tab_prof.set("qpp",i,qpp);
 	}
 	if (model=="gp") {
 	  thermo thth;
 	  eosg.gradient_qij(neutron,proton,thth,qnn,qnp,qpp,
 			    dqnndnn,dqnndnp,dqnpdnn,
 			    dqnpdnp,dqppdnn,dqppdnp);
-	  at.set("qnn",i,qnn);
-	  at.set("qnp",i,qnp);
-	  at.set("qpp",i,qpp);
+	  tab_prof.set("qnn",i,qnn);
+	  tab_prof.set("qnp",i,qnp);
+	  tab_prof.set("qpp",i,qpp);
 	} 
 
-	at.set("rho",i,neutron.n+proton.n);
-	at.set("alpha",i,neutron.n-proton.n);
-	at.set("ebulk",i,hb.ed-mun*at.get(1,i)-mup*at.get(2,i));
-	at.set("egrad",i,0.5*qnn*at.get(3,i)*at.get(3,i)+
-	       0.5*qpp*at.get(4,i)*at.get(4,i)+
-	       qnp*at.get(3,i)*at.get(4,i));
-	at.set("esurf",i,at.get("ebulk",i)+at.get("egrad",i));
-	at.set("thickint",i,at.get(1,i)/ nn_left-at.get(2,i)/np_left);
+	tab_prof.set("rho",i,neutron.n+proton.n);
+	tab_prof.set("alpha",i,neutron.n-proton.n);
+	tab_prof.set("ebulk",i,hb.ed-mun*tab_prof.get(1,i)-
+		     mup*tab_prof.get(2,i));
+	tab_prof.set("egrad",i,0.5*qnn*tab_prof.get(3,i)*tab_prof.get(3,i)+
+		     0.5*qpp*tab_prof.get(4,i)*tab_prof.get(4,i)+
+		     qnp*tab_prof.get(3,i)*tab_prof.get(4,i));
+	tab_prof.set("esurf",i,tab_prof.get("ebulk",i)+tab_prof.get("egrad",i));
+	tab_prof.set("thickint",i,tab_prof.get(1,i)/nn_left-
+		     tab_prof.get(2,i)/np_left);
 	if (fabs(protfrac-0.5)>1.0e-8) {
-	  at.set("wdint",i,at.get("alpha",i)/delta-at.get("rho",i));
-	  if (at.get("rho",i)>=1.0e-5) {
-	    barn=at.get("rho",i);
-	    at.set("wd2int",i,at.get("rho",i)*
-		   (pow(at.get("alpha",i)/delta/at.get("rho",i),2.0)*
-		    eos->fesym(barn)-hns));
+	  tab_prof.set("wdint",i,tab_prof.get("alpha",i)/delta-
+		       tab_prof.get("rho",i));
+	  if (tab_prof.get("rho",i)>=1.0e-5) {
+	    barn=tab_prof.get("rho",i);
+	    tab_prof.set("wd2int",i,tab_prof.get("rho",i)*
+			 (pow(tab_prof.get("alpha",i)/delta/
+			      tab_prof.get("rho",i),2.0)*
+			  eos->fesym(barn)-hns));
 	  }
 	}
       }
@@ -1650,14 +1718,18 @@ public:
       if (verbose>1) cout << "Integrals." << endl;
 
       interp<std::vector<double>,std::vector<double> > gi;
-      surf=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		    at[0],(at.get_column("esurf")));
-      sbulk=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		     at[0],(at.get_column("ebulk")));
-      sgrad=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		     at[0],(at.get_column("egrad")));
-      thick=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		     at[0],(at.get_column("thickint")));
+      surf=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		    tab_prof.get_nlines(),
+		    tab_prof[0],(tab_prof.get_column("esurf")));
+      sbulk=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		     tab_prof.get_nlines(),
+		     tab_prof[0],(tab_prof.get_column("ebulk")));
+      sgrad=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		     tab_prof.get_nlines(),
+		     tab_prof[0],(tab_prof.get_column("egrad")));
+      thick=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		     tab_prof.get_nlines(),
+		     tab_prof[0],(tab_prof.get_column("thickint")));
       if (verbose>1) {
 	cout << "surf: " << surf << endl;
 	cout << "thick: " << thick << endl;
@@ -1665,12 +1737,14 @@ public:
 	cout << "sgrad: " << sgrad << endl;
       }
       if (fabs(protfrac-0.5)>1.0e-8) {
-	wd=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		    at[0],(at.get_column("wdint")));
+	wd=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		    tab_prof.get_nlines(),
+		    tab_prof[0],(tab_prof.get_column("wdint")));
 	wd*=hns;
       
-	wd2=gi.integ(at.get(0,0),at[0][at.get_nlines()-1],at.get_nlines(),
-		     at[0],(at.get_column("wd2int")));
+	wd2=gi.integ(tab_prof.get(0,0),tab_prof[0][tab_prof.get_nlines()-1],
+		     tab_prof.get_nlines(),
+		     tab_prof[0],(tab_prof.get_column("wd2int")));
       
 	sssv_drop=4*pi*r0*r0*wd/hns;
       
@@ -1684,6 +1758,9 @@ public:
 	}
       
       }
+
+      double xline[3]={protfrac,wd,wd2};
+      tab_summ.line_of_data(3,xline);
     
       //--------------------------------------------
       // Add columns to check table:
@@ -1692,75 +1769,84 @@ public:
 	  model!="schematic" && model!="APR" && model!="gp") {
 	double tx;
 	si_vector_t ty(5), tdy(5);
-	if (!at.is_column("nnpp")) at.new_column("nnpp");
-	if (!at.is_column("nppp")) at.new_column("nppp");
-	if (!at.is_column("rhsn")) at.new_column("rhsn");
-	if (!at.is_column("rhsp")) at.new_column("rhsp");
-	if (!at.is_column("lhs_n")) at.new_column("lhs_n");
-	if (!at.is_column("lhs_a")) at.new_column("lhs_a");
-	if (!at.is_column("rhs_n")) at.new_column("rhs_n");
-	if (!at.is_column("rhs_a")) at.new_column("rhs_a");
-	at.set("nnpp",0,0.0);
-	at.set("nppp",0,0.0);
-	at.set("rhsn",0,0.0);
-	at.set("rhsp",0,0.0);
-	at.set("lhs_n",0,0.0);
-	at.set("lhs_a",0,0.0);
-	at.set("rhs_n",0,0.0);
-	at.set("rhs_a",0,0.0);
+	if (!tab_prof.is_column("nnpp")) tab_prof.new_column("nnpp");
+	if (!tab_prof.is_column("nppp")) tab_prof.new_column("nppp");
+	if (!tab_prof.is_column("rhsn")) tab_prof.new_column("rhsn");
+	if (!tab_prof.is_column("rhsp")) tab_prof.new_column("rhsp");
+	if (!tab_prof.is_column("lhs_n")) tab_prof.new_column("lhs_n");
+	if (!tab_prof.is_column("lhs_a")) tab_prof.new_column("lhs_a");
+	if (!tab_prof.is_column("rhs_n")) tab_prof.new_column("rhs_n");
+	if (!tab_prof.is_column("rhs_a")) tab_prof.new_column("rhs_a");
+	tab_prof.set("nnpp",0,0.0);
+	tab_prof.set("nppp",0,0.0);
+	tab_prof.set("rhsn",0,0.0);
+	tab_prof.set("rhsp",0,0.0);
+	tab_prof.set("lhs_n",0,0.0);
+	tab_prof.set("lhs_a",0,0.0);
+	tab_prof.set("rhs_n",0,0.0);
+	tab_prof.set("rhs_a",0,0.0);
 
-	rhsmode=false;
+	low_dens_part=false;
 
-	for(int i=1;i<((int)at.get_nlines());i++) {
+	for(int i=1;i<((int)tab_prof.get_nlines());i++) {
 	  
-	  at.set("nnpp",i,(at.get("nnp",i)-at.get("nnp",i-1))/
-		 (at.get("x",i)-at.get("x",i-1)));
-	  at.set("nppp",i,(at.get("npp",i)-at.get("npp",i-1))/
-		 (at.get("x",i)-at.get("x",i-1)));
-	
-	  tx=(at.get("x",i)+at.get("x",i-1))/2.0;
-	  ty[0]=(at.get("nn",i)+at.get("nn",i-1))/2.0;
-	  ty[1]=(at.get("np",i)+at.get("np",i-1))/2.0;
-	  ty[2]=(at.get("nnp",i)+at.get("nnp",i-1))/2.0;
-	  ty[3]=(at.get("npp",i)+at.get("npp",i-1))/2.0;
+	  tab_prof.set("nnpp",i,(tab_prof.get("nnp",i)-
+				 tab_prof.get("nnp",i-1))/
+		       (tab_prof.get("x",i)-tab_prof.get("x",i-1)));
+	  tab_prof.set("nppp",i,(tab_prof.get("npp",i)-
+				 tab_prof.get("npp",i-1))/
+		       (tab_prof.get("x",i)-tab_prof.get("x",i-1)));
+	  
+	  tx=(tab_prof.get("x",i)+tab_prof.get("x",i-1))/2.0;
+	  ty[0]=(tab_prof.get("nn",i)+tab_prof.get("nn",i-1))/2.0;
+	  ty[1]=(tab_prof.get("np",i)+tab_prof.get("np",i-1))/2.0;
+	  ty[2]=(tab_prof.get("nnp",i)+tab_prof.get("nnp",i-1))/2.0;
+	  ty[3]=(tab_prof.get("npp",i)+tab_prof.get("npp",i-1))/2.0;
 
-	  if (ty[1]<=0.0) rhsmode=true;
+	  if (ty[1]<=0.0) low_dens_part=true;
 	  derivs(tx,ty,tdy);
 	  
-	  at.set("rhsn",i,tdy[2]);
-	  at.set("rhsp",i,tdy[3]);
+	  tab_prof.set("rhsn",i,tdy[2]);
+	  tab_prof.set("rhsp",i,tdy[3]);
 	  
 	  if (ty[1]>0.0) {
-	    at.set("lhs_n",i,(neutron.mu-mun+proton.mu-mup)/2.0);
-	    at.set("lhs_a",i,(neutron.mu-mun-proton.mu+mup)/2.0);
-	    at.set("rhs_n",i,(at.get("nnpp",i)+at.get("nppp",i))/2.0*
-		   (qnn+qnp));
-	    at.set("rhs_a",i,(at.get("nnpp",i)-at.get("nppp",i))/2.0*
-		   (qnn-qnp));
+	    tab_prof.set("lhs_n",i,(neutron.mu-mun+proton.mu-mup)/2.0);
+	    tab_prof.set("lhs_a",i,(neutron.mu-mun-proton.mu+mup)/2.0);
+	    tab_prof.set("rhs_n",i,(tab_prof.get("nnpp",i)+
+				    tab_prof.get("nppp",i))/2.0*
+			 (qnn+qnp));
+	    tab_prof.set("rhs_a",i,(tab_prof.get("nnpp",i)-
+				    tab_prof.get("nppp",i))/2.0*
+			 (qnn-qnp));
 	  } else {
-	    at.set("lhs_n",i,neutron.mu-mun);
-	    at.set("rhs_n",i,at.get("nnpp",i)*(qnn));
-	    at.set("lhs_a",i,0.0);
-	    at.set("rhs_a",i,0.0);
+	    tab_prof.set("lhs_n",i,neutron.mu-mun);
+	    tab_prof.set("rhs_n",i,tab_prof.get("nnpp",i)*(qnn));
+	    tab_prof.set("lhs_a",i,0.0);
+	    tab_prof.set("rhs_a",i,0.0);
 	  }
 	}
       }
 
-      hdf_file hf;
       string tablename=((string)"nr")+std::to_string(pf_index);
       hf.open_or_create(out_file);
-      hdf_output(hf,at,tablename);
+      hdf_output(hf,tab_prof,tablename);
       hf.close();
-      cout << "Wrote solution to file " << out_file << "." << endl;
+      cout << "Wrote solution to file " << out_file << " ." << endl;
       cout << endl;
 
       // Loop for next proton fraction
     }
-  
+    
+    hf.open_or_create(out_file);
+    hdf_output(hf,tab_summ,"summary");
+    hf.close();
+    cout << "Wrote summary to file " << out_file << " ." << endl;
+    cout << endl;
+    
     return 0;
   }
 
-  /** \brief Desc
+  /** \brief Compute standard results and compare with stored output
    */
   int check(std::vector<std::string> &sv, bool itive_com) {
 
@@ -1841,6 +1927,11 @@ int main(int argc, char *argv[]) {
   p_out_file.str=&sn.out_file;
   p_out_file.help="Out_File (default \"nr.o2\")";
   cl.par_list.insert(make_pair("out_file",&p_out_file));
+
+  o2scl::cli::parameter_bool p_force_vacuum;
+  p_force_vacuum.b=&sn.force_vacuum;
+  p_force_vacuum.help="Force_Vacuum (default false)";
+  cl.par_list.insert(make_pair("force_vacuum",&p_force_vacuum));
 
   cl.run_auto(argc,argv);
   
