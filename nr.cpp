@@ -84,6 +84,8 @@ using namespace o2scl_hdf;
     \left( f_{\mathrm{bulk}} - \mu_{n,0} n_n - 
     \mu_{p,0} n_p \right) dx
     \f]
+    with the second equality because the bulk and gradient
+    contributions to the surface tension are exactly the same.
 
     In neutron-rich matter, the proton density vanishes while the
     neutron density extends out to \f$ x \rightarrow \infty \f$. In
@@ -1268,12 +1270,11 @@ public:
 
     flatden=false;
 
-    // Initialize table
+    // Initialize tables
     tab_prof.set_nlines(ngrid*2);
     tab_prof.line_of_names(((string)"x nn np nnp npp scale rho alpha ")+
 			   "ebulk egrad esurf thickint wdint wd2int");
-
-    tab_summ.line_of_names("pf wd wd2");
+    tab_summ.line_of_names("pf surf thick s_bulk s_grad wd wd2 nn_drip");
 
     // Allocate storage
     xstor.resize(ngrid+1);
@@ -1759,8 +1760,9 @@ public:
       
       }
 
-      double xline[3]={protfrac,wd,wd2};
-      tab_summ.line_of_data(3,xline);
+      double xline[8]={protfrac,surf,thick,sbulk,sgrad,wd,wd2,
+		       nn_drip};
+      tab_summ.line_of_data(8,xline);
     
       //--------------------------------------------
       // Add columns to check table:
