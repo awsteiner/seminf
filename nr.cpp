@@ -64,85 +64,116 @@ protected:
 
   /// Neutron chemical potential
   double mun;
+  
   /// Proton chemical potential
   double mup;
+  
   /** \brief Neutron number density on the LHS
    */
   double nn_left;
+  
   /** \brief Proton number density on the LHS
    */
   double np_left;
+  
   /// Isoscalar gradient term for neutrons
   double qnn;
+  
   /// Isoscalar gradient term for protons
   double qpp;
+  
   /// Isovector gradient term
   double qnp;
+  
   /// Saturation density of isospin-symmetric matter
   double n0half;
+  
   /** \brief Desc
    */
   bool showrelax;
+  
   /** \brief Desc
    */
   double barn;
+  
   /** \brief Desc
    */
   double dmundn;
+  
   /** \brief Desc
    */
   double dmundp;
+  
   /// Saturation density of matter with current proton fraction
   double nsat;
+  
   /// Current proton fraction (in high-density region)
   double protfrac;
+  
   /// Proton fraction index
   int pf_index;
+  
   /// EOS pointer
   eos_had_base *eos;
+  
   /// Neutron
   fermion neutron;
+  
   /// Proton
   fermion proton;
+  
   /// Thermodynamic functions
   thermo hb;
 
   /// If true, output relaxation iterations (default false)
   bool relaxfile;
+  
   /// If true, \f$ Q_{nn}=Q_{np} \f$
   bool qnn_equals_qnp;
+  
   /// If true, match to exponential decay on the RHS
   bool rhsmode;
+  
   /// Minimum err
   double minerr;
+  
   /// Desc
   double monfact;
+  
   /// Desc
   double expo;
+  
   /// Neutron drip density
   double nndrip;
+  
   /// Proton drip density
   double npdrip;
+  
   /// Desc (default false)
   bool flatden;
 
   /// Nonlinear equation solver
   mroot_hybrids<mm_funct,si_vector_t,si_matrix_t,jac_funct> nd;
+  
   /// Neutron drip density
   double nnrhs;
+  
   /// Proton drip density
   double nprhs;
+  
   /// Size of the low-density surface region
   double rhslength;
 
   /// If true, we have good boundary conditions
   bool goodbound;
+  
   /// Initial derivative for densities on LHS (typically negative)
   double firstderiv;
 
-  /** \brief Desc (default 3)
+  /** \brief Desc (default 3.0)
    */
   double big;
+  
   /** \brief The grid size (default 100)
    */
   int ngrid;
@@ -153,7 +184,7 @@ protected:
   si_matrix_t ystor;
   //@}
   
-  /// \name Desc
+  /// \name Store initial guesses for next proton fraction
   //@{
   si_vector_t xg1;
   si_vector_t xg2;
@@ -164,17 +195,22 @@ protected:
   /** \brief Desc
    */
   double relaxconverge;
+
   /** \brief Desc
    */
   double rhsmin;
+
   /** \brief The step size factor for constructing the initial 
       guess (default 7.0)
   */
   double initialstep;
+
   /// Integrator to compute integrals of final solution
   inte_qagiu_gsl<> gl2;
+
   /// Store the solution
   table<> at;
+
   /// \name Nucleon-nucleon interactions
   //@{
   eos_had_apr eosa;
@@ -182,6 +218,7 @@ protected:
   eos_had_skyrme eoss;
   eos_had_schematic eosp;
   //@}
+
   /// To compute derivatives
   deriv_gsl<> df;
   
@@ -1065,6 +1102,7 @@ public:
     yg2.resize(6,ngrid+1);
     rhs_adjust=0.0;
     model="NRAPR";
+    out_file="nr.o2";
   }
 
   /// Adjustment for RHS boundary
@@ -1072,6 +1110,9 @@ public:
 
   /// Type of EOS model in use
   string model;
+  
+  /// Name of output file
+  string out_file;
   
   /** \brief Desc
    */
@@ -1101,7 +1142,6 @@ public:
     double xn[3], xp[3];
     double thick;
     int npf;
-    ofstream fout;
     double lon, lop, hin, hip, sqt;
     double dqnndnn, dqnndnp, dqnpdnn, dqnpdnp, dqppdnn, dqppdnp;
 
@@ -1708,10 +1748,10 @@ public:
 
       hdf_file hf;
       string tablename=((string)"nr")+std::to_string(pf_index);
-      hf.open_or_create("nr.o2");
+      hf.open_or_create(out_file);
       hdf_output(hf,at,tablename);
       hf.close();
-      cout << "Wrote solution to file 'nr.o2'" << endl;
+      cout << "Wrote solution to file " << out_file << "." << endl;
       cout << endl;
 
       // Loop for next proton fraction
@@ -1794,8 +1834,13 @@ int main(int argc, char *argv[]) {
 
   o2scl::cli::parameter_string p_model;
   p_model.str=&sn.model;
-  p_model.help="Model (default NRAPR)";
+  p_model.help="Model (default \"NRAPR\")";
   cl.par_list.insert(make_pair("model",&p_model));
+
+  o2scl::cli::parameter_string p_out_file;
+  p_out_file.str=&sn.out_file;
+  p_out_file.help="Out_File (default \"nr.o2\")";
+  cl.par_list.insert(make_pair("out_file",&p_out_file));
 
   cl.run_auto(argc,argv);
   
