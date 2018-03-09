@@ -24,11 +24,10 @@
 #include <o2scl/eos_had_schematic.h>
 #include <o2scl/eos_had_skyrme.h>
 #include <o2scl/eos_had_potential.h>
-
 #include <o2scl/fermion_nonrel.h>
-
 #include <o2scl/inte_qagiu_gsl.h>
 #include <o2scl/inte_qag_gsl.h>
+#include <o2scl/cli.h>
 
 using namespace std;
 using namespace o2scl;
@@ -62,7 +61,7 @@ using namespace o2scl_hdf;
 class seminf_nr {
   
 protected:
-  
+
   /// Neutron chemical potential
   double mun;
   /// Proton chemical potential
@@ -172,8 +171,6 @@ protected:
       guess (default 7.0)
   */
   double initialstep;
-  /// Type of EOS model in use
-  string model;
   /// Integrator to compute integrals of final solution
   inte_qagiu_gsl<> gl2;
   /// Store the solution
@@ -196,7 +193,7 @@ protected:
 
     neutron.n=sy[0];
     proton.n=sy[1];
-    if (model=="apr") {
+    if (model=="APR") {
       eosa.gradient_qij2(neutron.n,proton.n,qnn,qnp,qpp,
 			  dqnndnn,dqnndnp,dqnpdnn,dqnpdnp,dqppdnn,dqppdnp);
     }
@@ -230,7 +227,7 @@ protected:
 	dydx[0]=0.0;
 	dydx[1]=sy[3];
 	dydx[2]=0.0;
-	if (model!="apr" && model!="gp") {
+	if (model!="APR" && model!="gp") {
 	  dydx[3]=(proton.mu-mup)/ qpp;
 	} else {
 	  dydx[3]=(proton.mu-mup+0.5*dqppdnp*sy[3]*sy[3])/ qpp;
@@ -239,7 +236,7 @@ protected:
     } else if (proton.n<=0.0) {
       dydx[0]=sy[2];
       dydx[1]=0.0;
-      if (model!="apr" && model!="gp") {
+      if (model!="APR" && model!="gp") {
 	dydx[2]=(neutron.mu-mun)/ qnn;
       } else {
 	dydx[2]=(neutron.mu-mun+0.5*dqnndnn*sy[2]*sy[2])/ qnn;
@@ -247,7 +244,7 @@ protected:
       dydx[3]=0.0;
     } else {
       if (rhsmode==false) {
-	if (model!="apr" && model!="gp") {
+	if (model!="APR" && model!="gp") {
 	  det=qnn*qpp-qnp*qnp;
 	  rhsn=(neutron.mu-mun)*qpp-(proton.mu-mup)*qnp;
 	  rhsp=(proton.mu-mup)*qnn-(neutron.mu-mun)*qnp;
@@ -267,7 +264,7 @@ protected:
 	  rhsp/=det;
 	}
       } else {
-	if (model!="apr" && model!="gp") {
+	if (model!="APR" && model!="gp") {
 	  rhsn=(neutron.mu-mun)/qnn;
 	  rhsp=0.0;
 	} else {
@@ -299,7 +296,7 @@ protected:
 
   /** \brief Solve the ODEs when \f$ Q_{nn} = Q_{np} \f$ 
    */
-  double solve_qnn_neq_qnp(double lmonfact, int argc) {
+  double solve_qnn_neq_qnp(double lmonfact) {
     bool guessdone;
     int debug=0;
     double dx, xrhs, delta, epsi;
@@ -1051,7 +1048,7 @@ protected:
     }
     // If rhsmode is true
     if (ieq==0) {
-      return y[0]-nndrip;
+      return y[0]-nndrip*(1.0+rhs_adjust);
     }
     return y[1];
   }
@@ -1066,12 +1063,19 @@ public:
     xg2.resize(ngrid+1);
     yg1.resize(6,ngrid+1);
     yg2.resize(6,ngrid+1);
+    rhs_adjust=0.0;
+    model="NRAPR";
   }
 
-  //--------------------------------------------
-  // Function prototypes
+  /// Adjustment for RHS boundary
+  double rhs_adjust;
+
+  /// Type of EOS model in use
+  string model;
   
-  int run(int argc, char *argv[]) {
+  /** \brief Desc
+   */
+  int calc(std::vector<std::string> &sv, bool itive_com) {
     
     double lex1;
     double lex2;
@@ -1089,7 +1093,8 @@ public:
     
     double wd=0.0, wd2=0.0, dtemp;
     double rhsn, rhsp, det;
-    double surf, sbulk, sgrad, sssv_drop=0.0, *pflist;
+    double surf, sbulk, sgrad, sssv_drop=0.0;
+    vector<double> pflist;
     si_vector_t sx(5), sy(5);
     double sssv_jim=0.0, hns, delta, w0jl=0.0, wdjl=0.0, den, w0;
     // Locations of fixed relative densities
@@ -1117,28 +1122,23 @@ public:
     //--------------------------------------------
     // Get model parameters
 
-    model="skyrme";
-
-    if (model==((string)"skyrme")) {
+    if (model==((string)"schematic")) {
+      eos=&eosp;
+    } else if (model==((string)"APR")) {
+      eos=&eosa;
+    } else if (model==((string)"gp")) {
+      eos=&eosg;
+    } else {
 
       eos=&eoss;
-      skyrme_load(eoss,"NRAPR");
+      skyrme_load(eoss,model);
       
       // Determine values of Q_{nn}, Q_{pp}, and Q_{np}
       qnn=0.1875*(eoss.t1*(1.0-eoss.x1)-eoss.t2*(1.0+eoss.x2));
       qpp=qnn;
       qnp=0.125*(3.0*eoss.t1*(1.0+eoss.x1/2.0)-
 		 eoss.t2*(1.0+eoss.x2/2.0));
-      
-    } else if (model==((string)"schematic")) {
-      eos=&eosp;
-    } else if (model==((string)"apr")) {
-      eos=&eosa;
-    } else if (model==((string)"gp")) {
-      eos=&eosg;
-    } else {
-      cout << "Unknown EOS" << endl;
-      exit(-1);
+
     }
   
     //--------------------------------------------
@@ -1191,23 +1191,11 @@ public:
     n0half=eos->fn0(0.0,dtemp);
     double r0=cbrt(0.75/pi/n0half);
 
-    pflist=new double[15];
-    pflist[0]=0.35;
-    pflist[1]=0.36;
-    pflist[2]=0.37;
-    pflist[3]=0.38;
-    pflist[4]=0.39;
-    pflist[5]=0.40;
-    pflist[6]=0.41;
-    pflist[7]=0.42;
-    pflist[8]=0.43;
-    pflist[9]=0.44;
-    pflist[10]=0.45;
-    pflist[11]=0.46;
-    pflist[12]=0.47;
-    pflist[13]=0.48;
-    pflist[14]=0.49;
-    npf=15;
+    pflist.resize(sv.size()-1);
+    for(size_t k=0;k<pflist.size();k++) {
+      pflist[k]=o2scl::stod(sv[k+1]);
+    }
+    npf=pflist.size();
   
     for(pf_index=1;pf_index<=npf;pf_index++) {
       protfrac=pflist[pf_index-1];
@@ -1545,7 +1533,7 @@ public:
       if (qnn_equals_qnp) {
 	//solve_qnn_equal_qnp(monfact);
       } else {
-	solve_qnn_neq_qnp(monfact,argc);
+	solve_qnn_neq_qnp(monfact);
       }
 
       //--------------------------------------------
@@ -1661,7 +1649,7 @@ public:
       // Add columns to check table:
     
       if (true && qnn_equals_qnp==false && 
-	  (model=="skyrme" || model=="hcskyrme")) {
+	  model!="schematic" && model!="APR" && model!="gp") {
 	double tx;
 	si_vector_t ty(5), tdy(5);
 	if (!at.is_column("nnpp")) at.new_column("nnpp");
@@ -1731,20 +1719,17 @@ public:
   
     return 0;
   }
-  
-};
 
+  /** \brief Desc
+   */
+  int check(std::vector<std::string> &sv, bool itive_com) {
 
-int main(int argc, char *argv[]) {
-  
-  cout.setf(ios::scientific);
-
-  seminf_nr sn;
-  sn.run(argc,argv);
-
-  if (argc>=2 && ((std::string)argv[1])=="check") {
+    vector<string> sv2={"calc","0.45","0.46"};
+    calc(sv2,itive_com);
+    
     test_mgr t;
     t.set_output_level(2);
+    
     hdf_file hf;
     string name;
     table_units<> tab, tab_expected;
@@ -1759,7 +1744,11 @@ int main(int argc, char *argv[]) {
     hdf_input(hf,tab_expected,name);
     hf.close();
 
+    cout << tab.get_nlines() << " " << tab.get_ncolumns() << endl;
+    cout << tab_expected.get_nlines() << " "
+	 << tab_expected.get_ncolumns() << endl;
     t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 1");
+    exit(-1);
 
     name="nr2";
 
@@ -1776,7 +1765,43 @@ int main(int argc, char *argv[]) {
     if (!t.report()) {
       exit(-1);
     }
+    
+    return 0;
   }
+  
+};
+
+int main(int argc, char *argv[]) {
+  
+  cout.setf(ios::scientific);
+
+  seminf_nr sn;
+  cli cl;
+  
+  static const int nopt=2;
+  o2scl::comm_option_s options[nopt]={
+    {0,"calc","",-1,-1,"<proton fraction 1> [pf2] [pf3] ...","",
+     new o2scl::comm_option_mfptr<seminf_nr>
+     (&sn,&seminf_nr::calc),o2scl::cli::comm_option_both},
+    {0,"check","",0,0,"","",
+     new o2scl::comm_option_mfptr<seminf_nr>
+     (&sn,&seminf_nr::check),o2scl::cli::comm_option_both}
+  };
+
+  cl.set_comm_option_vec(nopt,options);
+  cl.gnu_intro=false;
+  
+  o2scl::cli::parameter_double p_rhs_adjust;
+  p_rhs_adjust.d=&sn.rhs_adjust;
+  p_rhs_adjust.help="RHS adjustment (default 0.0)";
+  cl.par_list.insert(make_pair("rhs_adjust",&p_rhs_adjust));
+
+  o2scl::cli::parameter_string p_model;
+  p_model.str=&sn.model;
+  p_model.help="Model (default NRAPR)";
+  cl.par_list.insert(make_pair("model",&p_model));
+
+  cl.run_auto(argc,argv);
   
   return 0;
 }
