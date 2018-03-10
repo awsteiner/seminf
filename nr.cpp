@@ -37,6 +37,9 @@ using namespace o2scl_hdf;
 /** \brief Semi-infinite nuclear matter for nonrelativistic
     models in the Thomas-Fermi approximation
 
+    This discussion is a combination of Jim Lattimer's notes
+    and the material in \ref Steiner05ia .
+
     Given a energy density functional separated into
     bulk and gradient terms
     \f[
@@ -49,6 +52,10 @@ using namespace o2scl_hdf;
     one can minimize the thermodynamic potential
     \f[
     \Omega = \int \left(-P\right) dV
+    = \int~dV \left[ f_{\mathrm{bulk}} - \mu_n n_n - \mu_p n_p +
+    + \frac{Q_{nn}}{2} \left( \nabla n_n \right)^2 +
+    \frac{Q_{pp}}{2} \left( \nabla n_p \right)^2 +
+    Q_{np} \nabla n_n \nabla n_p \right]
     \f]
     to obtain the neutron and proton density profiles. 
     The Euler-Lagrange equations are 
@@ -63,6 +70,22 @@ using namespace o2scl_hdf;
     and a second equation with \f$ n \leftrightarrow p \f$,
     where \f$ f_{\mathrm{bulk}} = \varepsilon_{\mathrm{bulk}} - 
     T s_{\mathrm{bulk}} \f$ and \f$ \mu_{n,0} \f$ is a constant.
+    Multiplying the first equation by \f$ \nabla n_n \f$ and
+    the second by \f$ \nabla n_p \f$, adding,
+    and integrating gives
+    \f[
+    \frac{1}{2} \left[ Q_{nn} (\nabla n_n)^2 + Q_{pp} (\nabla n_p)^2
+    + 2 Q_{np} \nabla n_n \nabla n_p \right] = f_{\mathrm{bulk}}(n_B) - 
+    f_{\mathrm{bulk}}(n_{B,drip}) - \mu_{n,0} ( n_n - n_{n,\mathrm{drip}})
+    - \mu_{p,0} ( n_p - n_{p,\mathrm{drip}})
+    \f]
+    Then the surface thermodynamic potential is 
+    \f[
+    \Omega + P_0 V = 2 \int \left[ f_{\mathrm{bulk}}(n_B) 
+    - f_{\mathrm{bulk}}(n_{B,\mathrm{drip}}) 
+    - \mu_{n,0} ( n_n - n_{n,\mathrm{drip}})
+    - \mu_{p,0} ( n_p - n_{p,\mathrm{drip}}) \right]~dV
+    \f]
     
     In the
     semi-infinite matter approximation with a single coordinate,
@@ -76,20 +99,27 @@ using namespace o2scl_hdf;
     \f}
 
     The surface tension is 
-    \f{eqnarray}
+    \f{eqnarray*}
     \omega &=& \int_{-\infty}^{\infty} 
     \left( f - \mu_{n,0} n_n - \mu_{p,0} n_p \right) dx
     \nonumber \\
     \omega &=& 2 \int_{-\infty}^{\infty} 
     \left( f_{\mathrm{bulk}} - \mu_{n,0} n_n - 
     \mu_{p,0} n_p \right) dx
-    \f]
+    \f}
     with the second equality because the bulk and gradient
     contributions to the surface tension are exactly the same.
 
-    The neutron skin thickness in semi-infinite matter is
+    In semi-infinite matter one can define a radius
+    by 
     \f[
-    t \equiv \int_{-\infty}^{\infty} \left( \frac{n_n(z)}{n_{n,\mathrm{LHS}}} - 
+    n_{i,LHS}(R_i - L) = \int_{-L}^{\infty} n_i~dz \, ,
+    \f]
+    and using this defintion, the neutron skin thickness in
+    semi-infinite matter is
+    \f[
+    t \equiv \int_{-\infty}^{\infty} \left( \frac{n_n(z)}
+    {n_{n,\mathrm{LHS}}} - 
     \frac{n_p(z)}{n_{p,\mathrm{LHS}}} \right)~dz
     \f]
     and converting to a spherical geometry gives a factor of 
@@ -98,7 +128,7 @@ using namespace o2scl_hdf;
 
     Derive:
     \f[
-    \omega(\delta=0) &=& \sqrt{Q_{nn} + Q_{np}} 
+    \omega(\delta=0) = \sqrt{Q_{nn} + Q_{np}} 
     \int_{-\infty}^{\infty} 
     \left[ f_{\mathrm{bulk}}(n_B,\alpha=0)+n_B B \right]^{1/2} dn_B
     \f]
@@ -1883,7 +1913,7 @@ public:
     hdf_input(hf,tab_expected,name);
     hf.close();
 
-    t.test_rel_nonzero_table(tab,tab_expected,1.0e-8,1.0e-8,"table 1");
+    t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 1");
 
     name="nr2";
 

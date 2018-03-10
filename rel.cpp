@@ -21,6 +21,7 @@
 #include "seminf.h"
 
 #include <o2scl/eos_had_rmf.h>
+#include <o2scl/cli.h>
 
 using namespace std;
 using namespace o2scl;
@@ -29,6 +30,10 @@ using namespace o2scl_const;
 
 /** \brief Semi-infinite nuclear matter for relativistic mean-field
     models in the Thomas-Fermi approximation
+
+    RMF models in the semi-infinite matter approximation were first
+    computed in \ref Boguta77 and \ref Stocker91 . This code was
+    developed for \ref Steiner05ia.
 
     In the semi-infinite nuclear matter approximation, the 
     meson field equations are
@@ -62,37 +67,47 @@ protected:
   /** \brief The grid size
    */
   int ngrid;
+  
   /** \brief The saturation density at the current proton
       fraction
   */
   double nsat;
+  
   /** \brief The current proton fraction
    */
   double protfrac;
+  
   /** \brief The current neutron chemical potential
    */
   double mun;
+  
   /** \brief The current proton chemical potential
    */
   double mup;
+  
   /// \name The meson fields at the LHS
   //@{
   double sigma_left;
   double omega_left;
   double rho_left;
   //@}
+  
   /** \brief The hadronic EOS
    */
   eos_had_rmf rmf_eos;
+  
   /** \brief Thermodynamic variables
    */
   thermo hb;
+  
   /** \brief Thermodynamic variables
    */
   thermo tht;
+  
   /** \brief Neutron
    */
   fermion neutron;
+  
   /** \brief Proton
    */
   fermion proton;
@@ -167,30 +182,37 @@ public:
 
   seminf_rel() {
     ngrid=100;
+    model="RAPR";
+    out_file="rel.o2";
   }
+
+  /** \brief Model (default RAPR)
+   */
+  std::string model;
+  
+  /** \brief Desc
+   */
+  std::string out_file;
   
   /** \brief Main
    */
-  int run(int argc, char *argv[]) {
+  int calc(std::vector<std::string> &sv, bool itive_com) {
     
-    bool convergeflag;
-    bool flattendone;
-    bool summaryout=true;
-    bool iterfile=false;
-    bool outputiter=true;
+    bool converge_flag;
+    bool flatten_done;
+    bool summary_out=true;
+    bool output_iter=true;
     bool debug=true;
     double conve=1.0e-10;
     double protfrac=0.0;
     double fact=1.04;
-    double kfn;
-    double kfp;
-    double finalconverge=1.0e-12;
+    double final_converge=1.0e-12;
     double xcent;
-    double derivlimit=0.04;
-    int flattenit=70;
+    double deriv_limit=0.04;
+    int flatten_it=70;
     static const int ne=6, nb=3;
-    int lastit;
-    int npoints=64;
+    int last_it;
+    int n_points=64;
     si_vector_t xstor(ngrid);
     si_matrix_t ystor(ne,ngrid);
 
@@ -229,7 +251,7 @@ public:
     //--------------------------------------------
     // Equation of state and particle initializations
 
-    rmf_load(rmf_eos,"RAPR");
+    rmf_load(rmf_eos,model);
     neutron.init(o2scl_settings.get_convert_units().convert
 		 ("kg","1/fm",o2scl_mks::mass_neutron),2.0);
     proton.init(o2scl_settings.get_convert_units().convert
@@ -265,7 +287,7 @@ public:
     si_matrix_t oy(ngrid,ne);
     si_matrix_t A(ngrid*ne,ngrid*ne);
     si_vector_t rhs(ngrid*ne), dy(ngrid*ne);
-    if (outputiter) oit.verbose=1;
+    if (output_iter) oit.verbose=1;
     else oit.verbose=0;
     
     //--------------------------------------------
@@ -429,7 +451,7 @@ public:
 
 	// Load initial guess from file
 	hdf_file hf;
-	hf.open("rel.o2");
+	hf.open(out_file);
 	string tname;
 	if (pf_index==1) tname="rel1";
 	else tname="rel2";
@@ -447,12 +469,12 @@ public:
 
       }
 
-      convergeflag=true;
-      flattendone=false;
+      converge_flag=true;
+      flatten_done=false;
 
       int j;
-      for(j=1;j<=flattenit && flattendone==false && 
-	    convergeflag==true;j++) {
+      for(j=1;j<=flatten_it && flatten_done==false && 
+	    converge_flag==true;j++) {
       
 	//--------------------------------------------
 	// Store most recent result
@@ -470,7 +492,7 @@ public:
 	oit.solve(ngrid,ne,nb,ox,oy,f_derivs,f_left,f_right,
 		  A,rhs,dy);
 	  
-	if (outputiter) {
+	if (output_iter) {
 	  cout << "j: ";
 	  cout.width(2);
 	  cout << j << "  x(left): " << ox(ngrid-1)
@@ -479,17 +501,17 @@ public:
 	  cout.setf(ios::showpos);
 	  cout << "   rho'(left): " << oy(0,5);
 	  cout.unsetf(ios::showpos);
-	  cout << " conflag: " << convergeflag << endl;
+	  cout << " conflag: " << converge_flag << endl;
 	}
       
-	if (fabs(oy(0,3))<derivlimit && fabs(oy(0,4))<derivlimit &&
-	    fabs(oy(0,5))<derivlimit) {
-	  flattendone=true;
-	  if (outputiter) cout << endl;
+	if (fabs(oy(0,3))<deriv_limit && fabs(oy(0,4))<deriv_limit &&
+	    fabs(oy(0,5))<deriv_limit) {
+	  flatten_done=true;
+	  if (output_iter) cout << endl;
 	} else {
 	  // Why does this work? The alternative of simply extending
 	  // the LHS doesn't seem to work.
-	  if (convergeflag==true) {
+	  if (converge_flag==true) {
 	    for(int i=0;i<ngrid;i++) {
 	      ox[i]*=fact;
 	    }
@@ -497,11 +519,11 @@ public:
 	}
 	
       }
-      lastit=j-1;
+      last_it=j-1;
 
-      if (flattendone==false) {
+      if (flatten_done==false) {
 	cout << "Could not get vanishing derivative at boundary." << endl;
-      } else if (convergeflag==false) {
+      } else if (converge_flag==false) {
 	cout << "Relaxation did not converge." << endl;
 
 	//--------------------------------------------
@@ -517,7 +539,7 @@ public:
     
       } else {
 	cout << "Going to final solution." << endl;
-	oit.tol_rel=finalconverge;
+	oit.tol_rel=final_converge;
 	oit.solve(ngrid,ne,nb,ox,oy,f_derivs,f_left,f_right,
 		  A,rhs,dy);
       }
@@ -669,10 +691,10 @@ public:
 	inte_qag_gsl gl;
 	double xint=0.5*nsat, tweight;
       
-	for(int i=0;i<npoints*2;i++) {
-	  if (i>npoints) {
-	    nint=xint+xint*gl->get_abscissa(i-npoints);
-	    tweight=xint*gl->get_weight(i-npoints);
+	for(int i=0;i<n_points*2;i++) {
+	  if (i>n_points) {
+	    nint=xint+xint*gl->get_abscissa(i-n_points);
+	    tweight=xint*gl->get_weight(i-n_points);
 	  } else {
 	    nint=xint-xint*gl->get_abscissa(i);
 	    tweight=xint*gl->get_weight(i);
@@ -727,33 +749,29 @@ public:
       
 #endif
       
-      if (true) {
-	hdf_file hf;
-	string tablename=((string)"rel")+std::to_string(pf_index);
-	hf.open_or_create("rel.o2");
-	hdf_output(hf,at,tablename);
-	hf.close();
-	cout << "Wrote solution to file 'rel.o2'" << endl;
-	cout << endl;
-      }
+      hdf_file hf;
+      string tablename=((string)"rel")+std::to_string(pf_index);
+      hf.open_or_create(out_file);
+      hdf_output(hf,at,tablename);
+      hf.close();
+      cout << "Wrote solution to file " << out_file << " ." << endl;
+      cout << endl;
       
     }
 
     return 0;
   }
 
-};
+  /** \brief Compute standard results and compare with stored output
+   */
+  int check(std::vector<std::string> &sv, bool itive_com) {
 
-int main(int argc, char *argv[]) {
-  
-  cout.setf(ios::scientific);
-
-  seminf_rel sn;
-  sn.run(argc,argv);
-
-  if (argc>=2 && ((std::string)argv[1])=="check") {
+    vector<string> sv2={"calc","0.50","0.49"};
+    calc(sv2,itive_com);
+    
     test_mgr t;
     t.set_output_level(2);
+    
     hdf_file hf;
     string name;
     table_units<> tab, tab_expected;
@@ -785,7 +803,43 @@ int main(int argc, char *argv[]) {
     if (!t.report()) {
       exit(-1);
     }
+    
+    return 0;
   }
+  
+};
+
+int main(int argc, char *argv[]) {
+  
+  cout.setf(ios::scientific);
+
+  seminf_rel sr;
+  cli cl;
+
+  static const int nopt=2;
+  o2scl::comm_option_s options[nopt]={
+    {0,"calc","",-1,-1,"<proton fraction 1> [pf2] [pf3] ...","",
+     new o2scl::comm_option_mfptr<seminf_rel>
+     (&sr,&seminf_rel::calc),o2scl::cli::comm_option_both},
+    {0,"check","",0,0,"","",
+     new o2scl::comm_option_mfptr<seminf_rel>
+     (&sr,&seminf_rel::check),o2scl::cli::comm_option_both}
+  };
+
+  cl.set_comm_option_vec(nopt,options);
+  cl.gnu_intro=false;
+
+  o2scl::cli::parameter_string p_model;
+  p_model.str=&sr.model;
+  p_model.help="Model (default \"RAPR\")";
+  cl.par_list.insert(make_pair("model",&p_model));
+
+  o2scl::cli::parameter_string p_out_file;
+  p_out_file.str=&sr.out_file;
+  p_out_file.help="Out_File (default \"nr.o2\")";
+  cl.par_list.insert(make_pair("out_file",&p_out_file));
+
+  cl.run_auto(argc,argv);
   
   return 0;
 }
