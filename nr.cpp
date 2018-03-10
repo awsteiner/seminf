@@ -87,6 +87,22 @@ using namespace o2scl_hdf;
     with the second equality because the bulk and gradient
     contributions to the surface tension are exactly the same.
 
+    The neutron skin thickness in semi-infinite matter is
+    \f[
+    t \equiv \int_{-\infty}^{\infty} \left( \frac{n_n(z)}{n_{n,\mathrm{LHS}}} - 
+    \frac{n_p(z)}{n_{p,\mathrm{LHS}}} \right)~dz
+    \f]
+    and converting to a spherical geometry gives a factor of 
+    \f$ \sqrt{3/5} \f$ so the neutron skin thickness is
+    \f$ R_n - R_p = t \sqrt{3/5} \f$ .
+
+    Derive:
+    \f[
+    \omega(\delta=0) &=& \sqrt{Q_{nn} + Q_{np}} 
+    \int_{-\infty}^{\infty} 
+    \left[ f_{\mathrm{bulk}}(n_B,\alpha=0)+n_B B \right]^{1/2} dn_B
+    \f]
+
     In neutron-rich matter, the proton density vanishes while the
     neutron density extends out to \f$ x \rightarrow \infty \f$. In
     order to handle this, the algorithm separates the solution into
@@ -1137,7 +1153,6 @@ protected:
     // the neutron density goes to the drip density and the derivative
     // of the neutron density vanishes.
     if (ieq==0) {
-      if (force_vacuum) return y[0]-rhs_adjust;
       return y[0]-nn_drip*(1.0+rhs_adjust);
     }
     return y[1];
@@ -1163,7 +1178,6 @@ public:
     first_deriv=-2.0e-4;
     rhs_min=1.0e-7;
     monfact=0.002;
-    force_vacuum=false;
   }
 
   /// Adjustment for RHS boundary
@@ -1175,9 +1189,6 @@ public:
   /// Name of output file
   string out_file;
 
-  /// Desc
-  bool force_vacuum;
-  
   /** \brief Calculate nucleon profiles for a list of proton 
       fractions
   */
@@ -1929,11 +1940,6 @@ int main(int argc, char *argv[]) {
   p_out_file.str=&sn.out_file;
   p_out_file.help="Out_File (default \"nr.o2\")";
   cl.par_list.insert(make_pair("out_file",&p_out_file));
-
-  o2scl::cli::parameter_bool p_force_vacuum;
-  p_force_vacuum.b=&sn.force_vacuum;
-  p_force_vacuum.help="Force_Vacuum (default false)";
-  cl.par_list.insert(make_pair("force_vacuum",&p_force_vacuum));
 
   cl.run_auto(argc,argv);
   
