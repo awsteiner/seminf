@@ -56,9 +56,14 @@ using namespace o2scl_const;
     coordinate space and slowly spreading the solution out until the
     derivatives of the meson fields at the left boundary drop below a
     specified tolerance.
-    
+
     \note wd2int() is broken since fesym() tends to fail at low
     densities. For this reason, it wasn't used in \ref Steiner05ia .
+
+    \future This class probably needs to separately handle
+    the outer region where the neutron density is still
+    non-zero even though the proton density vanishes as
+    in the non-relativisitic class?
 */
 class seminf_rel {
 
@@ -233,7 +238,6 @@ public:
     double xn[3];
     double xp[3];
     
-    double temp;
     double nint;
     double dx=7.0/((double)ngrid);
     double xinterp;

@@ -58,12 +58,12 @@ rel: rel.o
 	$(CXX) $(ALL_FLAGS) -o rel rel.o $(LIB_DIRS) $(LIBS)
 
 clean:
-	rm -f nr *.o rel
+	rm -f nr rel *.o
 
 check:
-	./nr check > check_nr.scr
+	./nr -check > check_nr.scr
 	tail -n 2 check_nr.scr
-	./rel check > check_rel.scr
+	./rel -check > check_rel.scr
 	tail -n 2 check_rel.scr
 
 doc: empty
