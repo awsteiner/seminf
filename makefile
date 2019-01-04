@@ -85,6 +85,6 @@ doc: empty
 	cd sphinx; make html
 
 sync-doc:
-	sudo cp -r sphinx/build/html/* $(STATIC_DOC_DIR)/seminf
+	rsync -Cavzu sphinx/build/html/* $(STATIC_DOC_DIR)/seminf
 
 empty:

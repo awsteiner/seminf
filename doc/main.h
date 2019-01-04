@@ -11,7 +11,7 @@
     \htmlinclude rev.txt
 
     This code requires 
-    <a href="http://web.utk.edu/~asteine1/o2scl">O<sub>2</sub>scl</a>,
+    <a href="https://isospin.roam.utk.edu/static/code/o2scl">O<sub>2</sub>scl</a>,
     <a href="http://www.gnu.org/software/gsl">GSL</a>,
     <a href="http://www.boost.org">Boost</a>,
     <a href="http://www.hdfgroup.org/HDF5/">HDF5</a>.

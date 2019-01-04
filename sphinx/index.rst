@@ -15,7 +15,7 @@ This code requires requires the installation of `Boost
 <http://www.boost.org>`_, `GSL <http://www.gnu.org/software/gsl>`_
 (versions 1.16 and later), `HDF5 <http://www.hdfgroup.org>`_ (versions
 1.8.14 and later), the most current version of `O2scl
-<http://web.utk.edu/~asteine1/o2scl>`_ .
+<https://isospin.roam.utk.edu/static/code/o2scl>`_ .
     
 The code appears to work marginally for Skyrme model NRAPR (see
 \ref seminf_nr) and RMF model RAPR (see \ref seminf_rel), but
