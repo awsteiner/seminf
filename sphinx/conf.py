@@ -38,8 +38,8 @@ extensions = ['sphinx.ext.autodoc',
               'breathe']
 
 #
-breathe_projects = { "crust": os.path.abspath('../doc/xml') }
-breathe_default_project = "crust"
+breathe_projects = { "seminf": os.path.abspath('../doc/xml') }
+breathe_default_project = "seminf"
 #
 
 # Add any paths that contain templates here, relative to this directory.
@@ -55,8 +55,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'crust'
-copyright = '2018, Andrew W. Steiner'
+project = 'seminf'
+copyright = '2019, Andrew W. Steiner'
 author = 'Andrew W. Steiner'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -112,7 +112,7 @@ html_sidebars = {
 # -- Options for HTMLHelp output ------------------------------------------
 
 # Output file base name for HTML help builder.
-htmlhelp_basename = 'crustdoc'
+htmlhelp_basename = 'seminfdoc'
 
 
 # -- Options for LaTeX output ---------------------------------------------
@@ -139,7 +139,7 @@ latex_elements = {
 # (source start file, target name, title,
 #  author, documentclass [howto, manual, or own class]).
 latex_documents = [
-    (master_doc, 'crust.tex', 'crust Documentation',
+    (master_doc, 'seminf.tex', 'seminf Documentation',
      'Andrew W. Steiner', 'manual'),
 ]
 
@@ -149,7 +149,7 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    (master_doc, 'crust', 'crust Documentation',
+    (master_doc, 'seminf', 'seminf Documentation',
      [author], 1)
 ]
 
@@ -160,8 +160,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-    (master_doc, 'crust', 'crust Documentation',
-     author, 'crust', 'One line description of project.',
+    (master_doc, 'seminf', 'seminf Documentation',
+     author, 'seminf', 'One line description of project.',
      'Miscellaneous'),
 ]
 
