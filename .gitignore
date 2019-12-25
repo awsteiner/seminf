@@ -6,3 +6,4 @@ rel
 .travis.yml~
 doc/xml
 sphinx/build
+check_nr.scr
