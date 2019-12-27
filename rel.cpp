@@ -800,7 +800,7 @@ public:
     hdf_input(hf,tab_expected,name);
     hf.close();
 
-    t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 1");
+    t.test_rel_nonzero_table(tab,tab_expected,1.0e-8,1.0e-8,"table 1");
 
     name="rel2";
 
@@ -812,7 +812,7 @@ public:
     hdf_input(hf,tab_expected,name);
     hf.close();
 
-    t.test_rel_nonzero_table(tab,tab_expected,1.0e-12,1.0e-8,"table 2");
+    t.test_rel_nonzero_table(tab,tab_expected,1.0e-8,1.0e-8,"table 2");
     
     if (!t.report()) {
       exit(-1);
