@@ -54,7 +54,7 @@ script:
   # Perform the installation on linux. 
   # 
   - if [ "${TRAVIS_OS_NAME}" = "linux" ]; then
-      make check ;
+      make travis-check ;
     fi
 
 notifications:

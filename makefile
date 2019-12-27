@@ -66,6 +66,12 @@ check:
 	./rel -check > check_rel.scr
 	tail -n 2 check_rel.scr
 
+# This version shows output to the screen which ensures travis doesn't
+# time out
+travis-check:
+	./nr -check 
+	./rel -check
+
 doc: empty
 # Copy most recent tag files
 	cd doc; cp ~/o2scl/doc/o2scl/o2scl.tag .

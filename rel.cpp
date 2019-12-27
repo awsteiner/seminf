@@ -322,6 +322,14 @@ public:
       rmf_eos.set_thermo(tht);
       
       // Compute the saturation density for this proton fraction
+
+      // 12/27/19: I had to increase these tolerances to get the fn0() solver
+      // to work well. I think this is because it's hard to find the
+      // P=0 solution if the meson field equations aren't sufficiently
+      // accurate
+      rmf_eos.def_mroot.tol_rel=1.0e-9;
+      rmf_eos.def_mroot.tol_abs=1.0e-13;
+      
       nsat=rmf_eos.fn0(1.0-2.0*protfrac,eoatemp);
       cout << "Saturation density at x=" << protfrac << ": "
 	   << nsat << endl;
@@ -550,6 +558,8 @@ public:
 
       //--------------------------------------------
       // Store final solution to table
+
+      at.set_nlines(ngrid);
 
       for(int i=0;i<ngrid;i++) {
 	at.set("x",i,ox[i]);
