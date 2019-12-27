@@ -2,42 +2,59 @@ language: cpp
 
 os:
   - linux
-  - osx
+# For now, ignore OSX compilation since its too time consuming
+#  - osx
 
-dist: trusty
 sudo: required
 
-before_install:
-  # 
-  # On Linux, set LD_LIBRARY_PATH so the executable can find the
-  # o2scl libraries
-  # 
+# Set up the environment variables for the snap installation of
+# o2scl on linux. We need four library directories on both
+# LD_LIBRARY_PATH and LDFLAGS
+#
+# /snap/o2scl/current/usr/lib/x86_64-linux-gnu
+# /snap/o2scl/current/lib/x86_64-linux-gnu
+# /snap/o2scl/current/lib
+# /snap/o2scl/current/usr/lib/x86_64-linux-gnu/hdf5/serial
+#
+# For includes, we need the three directories
+# 
+# /snap/o2scl/current/include
+# /snap/o2scl/current/usr/include
+# /snap/o2scl/current/usr/include/hdf5/serial
+# 
+
+env:
+  - LD_LIBRARY_PATH="/snap/o2scl/current/usr/lib/x86_64-linux-gnu:/snap/o2scl/current/lib/x86_64-linux-gnu:/snap/o2scl/current/lib:/snap/o2scl/current/usr/lib/x86_64-linux-gnu/hdf5/serial" PATH="/usr/local/bin:/usr/bin:/bin:/snap/o2scl/current/bin" CXX="g++" LDFLAGS="-L/snap/o2scl/current/usr/lib/x86_64-linux-gnu -L/snap/o2scl/current/lib/x86_64-linux-gnu -L/snap/o2scl/current/lib -L/snap/o2scl/current/usr/lib/x86_64-linux-gnu/hdf5/serial" CXXFLAGS="-I/snap/o2scl/current/include -I/snap/o2scl/current/usr/include -I/snap/o2scl/current/usr/include/hdf5/serial"
+
+# Install o2scl
+
+addons:
+  snaps:
+    - name: o2scl
+      confinement: devmode
+      channel: latest/edge
+
+# We use 'acol --version' to verify the o2scl installation and
+# then install o2graph and verify that installation with o2graph -help
+
+#
+# Compile
+#
+
+install:
   - if [ "${TRAVIS_OS_NAME}" = "linux" ]; then
-      export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib ;
-    fi
-  # 
-  # Install GSL, Boost, HDF5, readline, ncurses
-  # 
-  - if [ "${TRAVIS_OS_NAME}" = "linux" ]; then
-      sudo apt-get install libgsl0-dev && sudo apt-get install libboost-all-dev libhdf5-dev libreadline-dev libncurses-dev ;
+       acol --version && make nr && make rel ;
     fi
 
 #
-# Installation script
+# Test
 #
 script:
   # 
   # Perform the installation on linux. 
   # 
   - if [ "${TRAVIS_OS_NAME}" = "linux" ]; then
-      git clone https://github.com/awsteiner/o2scl && cd o2scl && mkdir m4 && autoreconf -i && ./configure && make blank-doc && sudo make install && cd .. && ls /usr/local/lib && make nr && make rel && make check ;
-    fi
-  #
-  # Use homebrew to install the HEAD version of o2scl on OSX. We need
-  # to use '-v' for brew install so that the build doesn't timeout.
-  # 
-  - if [ "${TRAVIS_OS_NAME}" = "osx" ]; then
-      brew update && brew install homebrew/science/hdf5 && brew tap awsteiner/science && which autoconf && brew install o2scl --HEAD -v && make nr && make rel && make check;
+      make check ;
     fi
 
 notifications:

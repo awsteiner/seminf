@@ -1,7 +1,7 @@
 /*
   -------------------------------------------------------------------
   
-  Copyright (C) 2002-2018, Andrew W. Steiner
+  Copyright (C) 2002-2020, Andrew W. Steiner
   
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -349,6 +349,8 @@ protected:
       }
     }
 
+    if (neutron.n<0.0) neutron.n=0.0;
+    if (proton.n<0.0) proton.n=0.0;
     eos->calc_e(neutron,proton,hb);
 
     if (neutron.n<=0.0) {
