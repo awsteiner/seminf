@@ -209,7 +209,7 @@ public:
     bool output_iter=true;
     bool debug=true;
     double conve=1.0e-10;
-    double protfrac=0.0;
+    protfrac=0.0;
     double fact=1.04;
     double final_converge=1.0e-12;
     double xcent;

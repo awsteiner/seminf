@@ -17,8 +17,6 @@ LIB_DIRS = $(LDFLAGS)
 # directories may need to be here also.
 INC_DIRS = $(CXXFLAGS)
 
-# -I$(O2SCL_INC) -I$(HDF5_INC)
-
 # Generic (no MPI necessary) C++ compiler (e.g. g++)
 # CXX = 
 
@@ -38,12 +36,27 @@ LIBS = -lo2scl_hdf -lo2scl_eos -lo2scl_part -lo2scl \
 	-lhdf5_hl -lhdf5 -lgsl -lgslcblas -lm $(READLINE_LIBS)
 
 # ----------------------------------------------------------------------
+# UTK makefile (only enabled if UTKNA_MAKEFILE is defined)
+# ----------------------------------------------------------------------
+
+ifdef UTKNA_MAKEFILE
+
+include $(UTKNA_MAKEFILE)
+
+# UTK configuration
+LIBS = $(UTKNA_O2SCL_LIBS)
+ALL_FLAGS = $(UTKNA_CFLAGS) $(UTKNA_O2SCL_INCS) 
+CXX = $(UTKNA_CXX) 
+
+endif
+
+# ----------------------------------------------------------------------
 # Targets:
 # ----------------------------------------------------------------------
 
 help:
 	@echo "nr: Non-relativistic version "
-	@echo "rel: Relativsitic version"
+	@echo "rel: Relativistic version"
 	@echo "clean: "
 	@echo "check: "
 	@echo "doc: "
