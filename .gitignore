@@ -7,3 +7,4 @@ rel
 doc/xml
 sphinx/build
 check_nr.scr
+check_rel.scr
